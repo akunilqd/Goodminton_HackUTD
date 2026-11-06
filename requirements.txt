@@ -1,0 +1,11 @@
+# Python 3.10 recommended for MMPose; the pinned PyTorch also supports 3.11.
+# Install the CUDA wheels from README.md first; keep the MMCV-compatible versions.
+torch==2.1.0
+torchvision==0.16.0
+numpy>=1.26,<2
+opencv-python>=4.8,<4.12
+ultralytics>=8.4.47,<9
+huggingface-hub>=0.25,<2
+lap>=0.5.12
+# RTMPose's platform-specific MMPose/MMCV setup is documented in README.md.
+# TrackNet runs in its own environment when tracknet_python is set.

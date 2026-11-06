@@ -1,0 +1,6 @@
+{
+  "description": "SYNTHETIC EXAMPLE ONLY. Replace image_size and image_points for your fixed camera. Order: far-left, far-right, near-right, near-left doubles corners.",
+  "image_size": [1280, 720],
+  "image_points": [[400, 100], [880, 100], [1100, 650], [180, 650]],
+  "court_points_m": [[0, 0], [6.1, 0], [6.1, 13.4], [0, 13.4]]
+}
