@@ -43,7 +43,7 @@ Match Video
 | 2 | Shuttle Tracking | Trajectory gap filling | InpaintNet | Pretrained (fine-tune if needed) | Bundled with TrackNetV3 release |
 | 3 | Court Detection | Keypoint detection on court | CourtKeyNet-Finetuned (once per video) | Pretrained | https://huggingface.co/Cracked-ANJ/CourtKeyNet |
 | 3 | Court 2D Mapping | Perspective transform | OpenCV Homography | No weights (geometry) | `cv2.findHomography` + `cv2.perspectiveTransform` |
-| 4 | Hit Detection | Detect shuttle–racket contact frames | Heuristic / 1D CNN | Train from scratch | ShuttleSet annotations |
+| 4 | Hit Detection | Detect shuttle–racket contact frames | Trajectory + wrist heuristic | CPU, no training | Manual hit labels for evaluation |
 | 5 | Shot Classification | Classify shot type | BST (Badminton Shot Transformer) | Pretrained | See Module 5 weights below |
 | 6 | Analytics | Speed, heatmap, stats, timeline | Geometry + NumPy | No weights | Pure computation |
 
@@ -115,11 +115,17 @@ Match Video
 
 ---
 
-### Module 4 — Hit Detection
+### Module 4 - Hit Detection (implemented baseline)
 
-- **Approach:** Heuristic (shuttle velocity spike near player wrist keypoint) or 1D CNN over shuttle trajectory + pose time series
-- **No pretrained weights** — trained from scratch on ShuttleSet rally annotations
-- Training dataset: ShuttleSet — https://github.com/wywywywy/ShuttleSet
+- `module4/`: offline CPU heuristic over aligned M1 wrists and M2 trajectory.
+- Local velocity fits, direction/change candidates, bbox-normalized wrist proximity,
+  explicit missing/repair provenance, temporal suppression and uncertain hitter IDs.
+- No pretrained weights or training required; thresholds are configurable.
+- `main.py detect-hits` replays saved observations; `run --modules 1 2 3 4`
+  computes hits after frame alignment and writes `hits.jsonl`/`hit_summary.json`.
+- Optional manual rally ranges in replay; no automatic reliable rally/cut detection.
+- Hit scores are not probabilities. Boundary windows without context are skipped.
+- Validate against manually labeled hit frames and hitters before using for M5.
 
 ---
 
@@ -245,4 +251,4 @@ pair. The Body7 checkpoint above requires its matching config if selected.
 CourtKeyNet maps four outer corners to known court metres; no template is needed.
 Shuttle confidence is null because the upstream CSV exports visibility only.
 A shuttle homography projection is a floor-plane approximation, not a 3D position.
-The implementation currently stops at Module 3.
+The implementation currently stops at Module 4; M5/M6 remain planned.

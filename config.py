@@ -1,4 +1,4 @@
-"""Edit the Settings defaults below to configure all three modules."""
+"""Edit the Settings defaults below to configure all four modules."""
 
 import sys
 from dataclasses import dataclass
@@ -13,7 +13,7 @@ class Settings:
     # Input / Output
     video: Path = Path("data/match178_000.mp4")
     output: Path = Path("outputs/run2")
-    modules: tuple = ("1", "2", "3")
+    modules: tuple = ("1", "2", "3", "4")
 
     # Module 1: YOLO11 + ByteTrack + RTMPose-L.
     device: str = "cuda:0"  # Shared by M1, M2 and M3; CPU is an explicit opt-in.
@@ -44,6 +44,18 @@ class Settings:
     court_max_error_m: float = 0.2
     court_calibration: Path | None = None  # JSON: manual fixed-camera calibration.
 
+    # Module 4: offline CPU heuristics; velocities are image diagonals / second.
+    hit_max_gap_s: float = 0.08
+    hit_velocity_window_s: float = 0.16
+    hit_wrist_window_s: float = 0.08
+    hit_merge_window_s: float = 0.12
+    hit_min_speed: float = 0.04
+    hit_min_velocity_change: float = 0.12
+    hit_turn_degrees: float = 40.0
+    hit_wrist_radius: float = 0.65  # Distance / player bbox diagonal (racket reach).
+    hit_hitter_margin: float = 0.15
+    hit_min_score: float = 0.60
+
     def __post_init__(self):
         if isinstance(self.court_init_frame, bool) or not isinstance(self.court_init_frame, int) or self.court_init_frame < 0:
             raise ValueError("court_init_frame must be a non-negative integer")
@@ -73,6 +85,8 @@ class Settings:
             "player_confidence",
             "pose_confidence",
             "court_keypoint_confidence",
+            "hit_min_score",
+            "hit_hitter_margin",
         ):
             if not 0 < getattr(self, name) <= 1:
                 raise ValueError(f"{name} must be in (0, 1]")
@@ -81,10 +95,19 @@ class Settings:
             "tracknet_timeout_seconds",
             "court_ransac_threshold_m",
             "court_max_error_m",
+            "hit_max_gap_s",
+            "hit_velocity_window_s",
+            "hit_wrist_window_s",
+            "hit_merge_window_s",
+            "hit_min_speed",
+            "hit_min_velocity_change",
+            "hit_wrist_radius",
         ):
             value = getattr(self, name)
             if not 0 < value < float("inf"):
                 raise ValueError(f"{name} must be positive and finite")
+        if not 0 < self.hit_turn_degrees < 180:
+            raise ValueError("hit_turn_degrees must be in (0, 180)")
 
 
 def require_file(path: Path | None, setting: str) -> Path:

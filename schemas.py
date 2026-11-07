@@ -44,3 +44,17 @@ class FrameResult:
     players: list[Player] | None = None
     shuttle: Shuttle | None = None
     court: Court | None = None
+
+
+@dataclass
+class HitEvent:
+    event_id: int
+    rally_id: str | int | None
+    frame_index: int
+    timestamp_s: float
+    hitter_id: int | None
+    hit_score: float  # Heuristic evidence score, NOT a calibrated probability.
+    hitter_score: float
+    timing_uncertainty_frames: int
+    quality_flags: list[str] = field(default_factory=list)
+    source: str = "heuristic_v1"

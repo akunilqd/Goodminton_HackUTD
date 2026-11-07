@@ -35,11 +35,16 @@ def configure_device(value: str) -> str:
 
 def preflight(settings: Settings, modules: set[str]):
     errors, warnings = [], []
+    if "4" in modules and not {"1", "2", "3"}.issubset(modules):
+        errors.append("Video M4 requires --modules 1 2 3 4; use detect-hits to replay an existing run.")
     if "1" in modules and "3" not in modules:
         errors.append("Two-player court tracking requires Module 3; use --modules 1 3 (or 1 2 3).")
     packages = set()
     files = []
     devices = {}
+    if "4" in modules:
+        packages.add("numpy")
+        devices["4"] = "cpu"
     if "1" in modules or ("3" in modules and not settings.court_calibration):
         try:
             device = configure_device(settings.device)
@@ -87,11 +92,11 @@ def preflight(settings: Settings, modules: set[str]):
 
 
 def build_parser(settings):
-    parser = argparse.ArgumentParser(description="Badminton analysis: Modules 1, 2 and 3")
+    parser = argparse.ArgumentParser(description="Badminton analysis: Modules 1-4")
     sub = parser.add_subparsers(dest="command", required=True)
     for command in ("run", "check"):
         item = sub.add_parser(command)
-        item.add_argument("--modules", nargs="+", choices=["1", "2", "3"], default=list(settings.modules))
+        item.add_argument("--modules", nargs="+", choices=["1", "2", "3", "4"], default=list(settings.modules))
         if command == "run":
             item.add_argument("video", type=Path, nargs="?", default=settings.video)
             item.add_argument("--court-init-frame", type=int, default=settings.court_init_frame)
@@ -100,6 +105,15 @@ def build_parser(settings):
     inspect.add_argument("video", type=Path, nargs="?", default=settings.video)
     inspect.add_argument("--frame", type=int, default=0)
     inspect.add_argument("--output", type=Path, required=True, help="New output directory")
+    hits = sub.add_parser("detect-hits", help="Run CPU-only M4 on a complete saved M1/M2 run")
+    hits.add_argument("run_dir", type=Path)
+    hits.add_argument("--output", type=Path, required=True, help="New output directory")
+    hits.add_argument("--rallies", type=Path, help="Optional JSON list of inclusive rally frame ranges")
+    review = sub.add_parser("annotate-hits", help="Mark hit JSONL timestamps on a video without inference")
+    review.add_argument("video", type=Path)
+    review.add_argument("--hits", type=Path, required=True)
+    review.add_argument("--output", type=Path, required=True, help="New .mp4 output file")
+    review.add_argument("--hold-seconds", type=float, default=0.16)
     return parser
 
 
@@ -145,6 +159,18 @@ def main(argv=None):
     try:
         settings = Settings()
         args = build_parser(settings).parse_args(argv)
+        if args.command == "annotate-hits":
+            from pipeline import annotate_hits
+
+            result = annotate_hits(args.video, args.hits, args.output, args.hold_seconds)
+            print(json.dumps(result, indent=2))
+            return 0
+        if args.command == "detect-hits":
+            from module4 import detect_saved_run
+
+            summary = detect_saved_run(settings, args.run_dir, args.output, args.rallies)
+            print(json.dumps(summary, indent=2))
+            return 0
         if args.command == "court-frame":
             court_frame(settings, args)
             print(f"Court inspection saved to {args.output.resolve()}")
@@ -178,7 +204,10 @@ def main(argv=None):
                 if settings.court_calibration
                 else CourtDetector(settings)
             )
-        output = Pipeline(players, shuttle, court).run(args.video, args.output)
+        from module4 import HitDetector
+
+        hits = HitDetector(settings) if "4" in modules else None
+        output = Pipeline(players, shuttle, court, hits).run(args.video, args.output)
         print(f"Analysis saved to {output}")
         return 0
     except (OSError, ValueError, RuntimeError, ImportError, KeyError) as exc:

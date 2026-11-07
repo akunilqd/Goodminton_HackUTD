@@ -1,6 +1,6 @@
 # Badminton Analysis — Modules 1, 2 and 3
 
-Analyze a badminton video with three independent modules and one Python entry point.
+Analyze a badminton video with four modules and one Python entry point.
 Modules 4–6 (hit detection, shot classification and analytics) are outside this implementation.
 
 ```text
@@ -162,6 +162,69 @@ python -B main.py run data/match178_000.mp4 --modules 1 2 3 --court-init-frame 0
 These existing commands create normal artifacts when invoked. `court-frame` and
 the pipeline use the same corner/court-line renderer. Run metadata records the
 calibration frame and number of model inferences.
+
+### Module 4: offline hit detection (CPU)
+
+`module4/` consumes aligned M1 player poses and M2 shuttle coordinates. It fits
+local before/after velocities, tests direction/velocity changes, checks proximity
+to both wrists normalized by bounding-box diagonal, and suppresses nearby duplicate
+candidates. Short bounded gaps can be interpolated; long gaps and incomplete
+boundary windows are not classified. Possible serves use a rest-to-motion branch.
+Strong trajectory evidence without wrists can produce a hit with an unknown hitter;
+known wrists far from the shuttle reject a candidate. Identity alternation is only
+a review flag, not a forced correction.
+
+Defaults include M4. Full video mode requires M1/M2/M3 because M1 uses the court
+hull. Replay needs only saved M1/M2 outputs and does not load neural models or decode
+video. A valid homography is optional for M4: it deliberately uses image coordinates
+for contact evidence, not a floor projection of the airborne shuttle.
+
+```powershell
+# Fast iteration from existing observations; source remains unchanged.
+python -B main.py detect-hits outputs/run2 --output outputs/hits-new
+# Full video pipeline, one new output directory.
+python -B main.py run data/match178_000.mp4 --modules 1 2 3 4 --output outputs/full-new
+# Optional verified rally boundaries for replay.
+python -B main.py detect-hits outputs/run2 --rallies data/rallies.json --output outputs/hits-rallies-new
+# Behavioral tests.
+python -B -m unittest module4.test_detector -v
+```
+
+Optional rally JSON is a list of objects with unique `rally_id`, zero-based
+`start_frame` and inclusive `end_frame`; ranges must be sorted and non-overlapping.
+Frames outside those ranges are excluded. Without annotations, `rally_id` is null
+and events carry `rally_unverified`. Tracking gaps are never declared rally endings.
+The detector does not identify camera cuts; trim them or supply separate rally ranges.
+
+Outputs are `hits.jsonl` (HitEvent records) and `hit_summary.json` (counts,
+unusable ranges, unclassified boundary coverage, effective threshold, settings and
+timing). Full-pipeline metadata also contains the M4 summary. Hits are computed
+at the end of the offline pass; the existing annotated video still shows M1-M3,
+not a second rendered pass with hit labels. Use the optional review command below
+to mark existing hit JSONL events without rerunning inference. No M5 classification
+is performed.
+
+```powershell
+python -B main.py annotate-hits outputs/full-new/shuttle.mp4 --hits outputs/full-new/hits.jsonl --output outputs/hit-review.mp4
+```
+
+The review video preserves resolution/FPS (no audio), adds a red border on each
+exact hit frame, and holds an amber label for 0.16 seconds afterwards. Labels show
+event ID, hitter, JSON timestamp, frame index and heuristic score; the bottom bar
+shows all event ticks and the current video time. `--hold-seconds 0` disables the
+label hold. Existing output files are never overwritten; JSON frame/timestamp
+mismatches and events beyond the decoded video are rejected.
+
+Scores are heuristic evidence, not probabilities; `hitter_score` is separate from
+`hit_score`. `timing_uncertainty_frames` is a conservative window radius, not an
+empirically calibrated confidence interval. Repaired/interpolated contexts and
+ambiguous identities are flagged. A `possible_serve` flag is not a shot label.
+
+Tune the `hit_*` settings in config.py. Time windows are in seconds and convert to
+frames at the source FPS; velocities are image diagonals per second. The current
+thresholds are a baseline, not validated high-accuracy settings. Assess hit F1 with
+one-to-one temporal matching, timing error and hitter accuracy against manual
+annotations on independent rallies before feeding events to BST unattended.
 
 ## Run
 

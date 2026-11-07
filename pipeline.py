@@ -98,15 +98,103 @@ def write_json(path: Path, value):
     path.write_text(json.dumps(value, indent=2, allow_nan=False) + "\n", encoding="utf-8")
 
 
+def annotate_hits(video: Path, hits_path: Path, output: Path, hold_s: float = 0.16):
+    """Render JSONL hit timestamps without rerunning inference. Output has no audio.
+
+    Red marks the exact contact frame; amber holds its label briefly afterwards.
+    Frame index and timestamp must agree with the input video's CFR timebase.
+    """
+    if not math.isfinite(hold_s) or hold_s < 0:
+        raise ValueError("hold_s must be non-negative and finite")
+    output = Path(output).resolve()
+    partial = output.with_name(output.stem + ".partial.mp4")
+    if output.suffix.lower() != ".mp4":
+        raise ValueError("Hit review output must be .mp4")
+    if output.exists() or partial.exists():
+        raise ValueError("Review output already exists; select a new filename")
+    with Path(hits_path).open(encoding="utf-8") as stream:
+        events = [json.loads(line) for line in stream if line.strip()]
+    with VideoReader(video) as reader:
+        fps, width, height = reader.info.fps, reader.info.width, reader.info.height
+        by_frame = {}
+        for event in events:
+            index, timestamp = event["frame_index"], event["timestamp_s"]
+            if (type(index) is not int or index < 0 or index in by_frame
+                    or not math.isfinite(timestamp)
+                    or not math.isclose(index / fps, timestamp, abs_tol=1e-5)):
+                raise ValueError("Hit frames must be unique, non-negative and match video timestamps")
+            by_frame[index] = event
+        ordered = sorted(by_frame)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        writer = cv2.VideoWriter(str(partial), cv2.VideoWriter_fourcc(*"mp4v"), fps, (width, height))
+        if not writer.isOpened():
+            raise RuntimeError(f"Cannot write review video: {partial}")
+        scale = max(.4, width / 1920)
+        margin, line_height = round(20 * scale), round(36 * scale)
+        hold_frames = round(hold_s * fps)
+        current, total, seen = None, 0, 0
+        try:
+            for index, timestamp, frame in reader:
+                exact = index in by_frame
+                if exact:
+                    current = by_frame[index]
+                    seen += 1
+                active = current is not None and index - current["frame_index"] <= hold_frames
+                color = (0, 0, 255) if exact else (0, 190, 255)
+                x = max(margin, width - round(720 * scale))
+                if active:
+                    panel = frame[margin:margin + 4 * line_height, x:width - margin]
+                    panel[:] = (panel.astype(np.float32) * .2).astype(np.uint8)
+                    player = current.get("hitter_id")
+                    text = [
+                        f"{'HIT NOW' if exact else 'HIT REPLAY'}  #{current['event_id']}  Player {player if player is not None else '?'}",
+                        f"JSON: {current['timestamp_s']:.3f}s | frame {current['frame_index']}",
+                        f"Score: {current['hit_score']:.2f} (heuristic)",
+                    ]
+                    for row, label in enumerate(text):
+                        cv2.putText(frame, label, (x + margin, margin + (row + 1) * line_height),
+                                    cv2.FONT_HERSHEY_SIMPLEX, .8 * scale, color, max(1, round(2*scale)), cv2.LINE_AA)
+                if exact:
+                    cv2.rectangle(frame, (2, 2), (width - 3, height - 3), color, max(2, round(8*scale)))
+                # Persistent clock and counter make frame-by-frame verification easy.
+                label = f"VIDEO {timestamp:.3f}s | frame {index} | hits {seen}/{len(events)}"
+                y = height - margin - line_height
+                cv2.putText(frame, label, (margin, y), cv2.FONT_HERSHEY_SIMPLEX,
+                            .75*scale, (0, 0, 0), max(3, round(5*scale)), cv2.LINE_AA)
+                cv2.putText(frame, label, (margin, y), cv2.FONT_HERSHEY_SIMPLEX,
+                            .75*scale, (255, 255, 255), max(1, round(2*scale)), cv2.LINE_AA)
+                denominator = max(reader.info.reported_frame_count - 1, max(ordered, default=0), 1)
+                def marker(f):
+                    return margin + round((width - 2*margin) * min(f / denominator, 1.))
+                baseline = height - margin
+                cv2.line(frame, (margin, baseline), (width-margin, baseline), (80, 80, 80), max(2, round(4*scale)))
+                for hit_frame in ordered:
+                    px = marker(hit_frame)
+                    cv2.line(frame, (px, baseline-8), (px, baseline+8), (0, 190, 255), 2)
+                cv2.circle(frame, (marker(index), baseline), max(3, round(6*scale)), (255, 255, 255), -1)
+                writer.write(frame)
+                total += 1
+            if total == 0 or seen != len(events):
+                raise ValueError("Video is empty or hit JSON contains events beyond decoded video")
+        finally:
+            writer.release()
+        partial.replace(output)
+    return {"output": str(output), "frames": total, "hits": seen, "fps": fps,
+            "exact_marker": "red border", "label_hold_seconds": hold_s, "audio": False}
+
+
 class Pipeline:
     """Instances are injectable for testing; None explicitly disables a module."""
 
-    def __init__(self, players=None, shuttle=None, court=None):
+    def __init__(self, players=None, shuttle=None, court=None, hits=None):
         if players is None and shuttle is None and court is None:
             raise ValueError("Select at least one module")
         self.players = players
         self.shuttle = shuttle
         self.court = court
+        self.hits = hits
+        if hits is not None and (players is None or shuttle is None):
+            raise ValueError("Module 4 requires player and shuttle modules")
 
     def run(self, video: Path, output_dir: Path) -> Path:
         # Open before creating artifacts; never overwrite an earlier run.
@@ -121,6 +209,7 @@ class Pipeline:
                     "m1": self.players is not None,
                     "m2": self.shuttle is not None,
                     "m3": self.court is not None,
+                    "m4": self.hits is not None,
                 },
                 "processed_frames": 0,
                 "court_coordinates": "metres: far-left origin, x across 6.10m, y toward near baseline 13.40m",
@@ -195,6 +284,18 @@ class Pipeline:
                     raise ValueError("Shuttle output frame count differs from decoded video")
                 if samples is not None:
                     self._write_shuttle_csv(output_dir / "shuttle.csv", samples, reader.info.fps)
+
+                if self.hits is not None:
+                    from module4 import write_hits
+
+                    LOGGER.info("Detecting hits from aligned M1/M2 records on CPU")
+                    with partial.open(encoding="utf-8") as stream:
+                        events, summary = self.hits.detect(
+                            (json.loads(line) for line in stream), reader.info.fps,
+                            reader.info.width, reader.info.height,
+                        )
+                    write_hits(output_dir, events, summary)
+                    metadata["hit_detection"] = summary
 
                 writer.release()
                 writer = None
