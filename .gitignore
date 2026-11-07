@@ -22,7 +22,6 @@ Thumbs.db
 
 # External source, datasets, model weights, generated artifacts
 external/
-weights/
 data/
 outputs/
 runs/
