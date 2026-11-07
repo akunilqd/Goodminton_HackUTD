@@ -7,7 +7,7 @@ Modules 4–6 (hit detection, shot classification and analytics) are outside thi
 HackUTD/
 ├── module1_players/       # YOLO11m → ByteTrack → RTMPose-L, 17 joints
 ├── module2_shuttle/       # TrackNetV3 → InpaintNet, aligned shuttle positions
-├── module3_court/         # 30 court keypoints → homography → court metres
+├── module3_court/         # 4 CourtKeyNet corners → homography → court metres
 ├── configs/              # Example manual court calibration
 ├── main.py               # Run, check setup, inspect court keypoints
 ├── pipeline.py           # Join module outputs by frame and write results
@@ -54,7 +54,7 @@ the other requirements, keeping PyTorch and MMCV compatible:
 
 The CUDA wheel pairing follows the [PyTorch version table](https://docs.pytorch.org/get-started/previous-versions/).
 `check` reports each selected module's device and checks Module 2 in its own Python
-environment. `gpu_half = True` enables FP16 for both YOLO models, mixed precision
+environment. `gpu_half = True` enables FP16 for the M1 YOLO model, mixed precision
 for RTMPose, and FP16 for TrackNet. Set it to `False` for FP32 inference while
 keeping CUDA enabled. InpaintNet keeps FP32 coordinates on the GPU. cuDNN kernel
 selection and pinned TrackNet batches accelerate CUDA inference. ByteTrack,
@@ -130,41 +130,38 @@ at the cost of running TrackNet twice. It uses non-overlapping temporal windows
 and upstream large-video mode. Each subprocess has a configurable timeout and
 its own log. Use `.mp4` input and a new output directory for each run.
 
-### Module 3: court detection and mapping
+### Module 3: CourtKeyNet fixed-camera calibration
 
-The [court model](https://huggingface.co/Huydinh1205/court_yolo11n_pose) downloads
-automatically when `court_weights` is `None`. It produces **30 keypoints**, correcting
-the design's older references to 14.
+M3 uses [CourtKeyNet-Finetuned](https://huggingface.co/Cracked-ANJ/CourtKeyNet).
+The architecture is embedded in `module3_court/detector.py` with its MIT notice;
+no extra source files/checkout are needed. Safetensors loads the pinned weights
+(revision `8254e285ed0ed496a96fa4632111c80ffb645998`) into a system temporary cache.
+Set `court_weights` to a local `.safetensors` path for persistent storage elsewhere.
 
-For automatic metre mapping, set `court_template` to a JSON file containing
-`court_points_m`: 30 distinct `[x, y]` pairs in the model's exact keypoint order.
-The model card describes a snake layout but does not publish the full coordinate
-table. No guessed table is enabled. With no template, detection still works and
-returns `status="template_required"`, with mapping fields set to `null`.
+The pipeline infers once at `court_init_frame` (default 0) in FP32, validates the
+four corners, then caches them and H for the full video. Corners are TL, TR, BR, BL,
+mapped to `(0,0), (6.10,0), (6.10,13.40), (0,13.40)` metres. No 30-point template
+is needed. M1 still uses the fixed corner hull to filter players. `gpu_half` does
+not change M3's FP32 calibration. Resolution changes fail; camera moves, zooms
+or cuts require recalibration and are not automatically detected.
 
-Inspect numbered detections to establish the correspondence using the training
-annotations:
+The repeated score in each corner is a shared court quality heuristic using the
+upstream GUI weighting: 0.4 peak + 0.4 valid geometry + 0.2 inverse entropy.
+It is not a calibrated per-corner probability. Invalid geometry or low quality
+fails explicitly; select another frame or set `court_calibration` to verified
+manual correspondences. Four-point fit residual is NOT independent accuracy:
+inspect projected internal court lines or measure held-out line intersections.
 
 ```powershell
-python main.py court-frame data/match.mp4 --frame 0 --output outputs/court-inspection
+python -B main.py check --modules 3
+python -B main.py court-frame data/match178_000.mp4 --frame 0 --output outputs/court-inspection-new
+python -B main.py run data/match178_000.mp4 --modules 3 --court-init-frame 0 --output outputs/court-only-new
+python -B main.py run data/match178_000.mp4 --modules 1 2 3 --court-init-frame 0 --output outputs/full-new
 ```
 
-This exports `court.jpg` and `court.json`. Use court-floor points only. Metre
-coordinates run x across the 6.10 m doubles width and y along the 13.40 m length;
-use a consistent origin and orientation.
-
-For a **fixed camera**, use manual calibration without the court ML model:
-
-1. Copy `configs/calibration.example.json` to `configs/my_court.json`.
-2. Replace its synthetic pixel coordinates and image dimensions with those from
-   your video. Pair at least four non-collinear image points with court metres.
-3. Set `court_calibration = Path("configs/my_court.json")` in `config.py`.
-
-The example orders the doubles corners far-left, far-right, near-right, near-left.
-Manual calibration must be redone after a camera move, zoom, or cut. The automatic
-detector recalculates geometry each frame and does not reuse a stale fit when
-detection fails. RANSAC rejects outliers; insufficient or degenerate geometry
-produces a status and no homography. Calibration resolution mismatches fail.
+These existing commands create normal artifacts when invoked. `court-frame` and
+the pipeline use the same corner/court-line renderer. Run metadata records the
+calibration frame and number of model inferences.
 
 ## Run
 
@@ -202,7 +199,7 @@ The annotated video is `shuttle.mp4` when M2 is enabled (preserving the existing
 video filename), or `annotated.mp4` when running M1/M3 without M2. It preserves
 source resolution and FPS and contains no audio. Overlays use the existing
 `pose_confidence` and `court_keypoint_confidence` thresholds. Court points are
-labelled C0?C29; no guessed court-line connections are drawn. Inference always
+labelled C0-C3; standard court-floor lines are projected through the homography. Inference always
 receives the original frame before any drawing.
 
 Module 2 files are only written when selected. Disabled module fields are `null`;
@@ -228,12 +225,23 @@ Runs never overwrite an existing output directory. Failed runs retain
 
 ## Verification
 
+Current CourtKeyNet verification (2026-11-07): strict checkpoint loading and CUDA
+FP32 inference passed on `match178_000.mp4`. The 250-frame clip was decoded and
+processed with one model inference and a cached four-corner homography. The actual
+`main.run`/pipeline path was also exercised with output sinks mocked in memory,
+including 250 rendered frames, to avoid creating extra files. Geometry and visual
+alignment are not ground-truth accuracy measurements; the preview shows some
+boundary offset and no independently annotated accuracy score is available.
+
+
+The older YOLO court benchmarks below are historical, not current M3 measurements.
+
 GPU verification on the RTX 3050 6 GB used the existing `.venv-setup` environment
 (PyTorch 2.1.0+cu118, torchvision 0.16.0+cu118, MMCV 2.1.0 built for CUDA 11.8):
 
 - `main.py check` reports `cuda:0` for all three modules; `pip check` passes.
 - Before court filtering, M1/M3 inference passed on a real match frame: 8 people, 17 joints per person,
-  and 30 court keypoints. The actual inference models were verified on CUDA;
+  and 4 CourtKeyNet corners. The actual inference models were verified on CUDA;
   both YOLO predictors used FP16. Explicit CPU inference also passed.
 - Before court filtering, after two warm-up iterations, five repeated runs of that frame averaged
   75.64 ms for M1+M3 on GPU versus 1008.51 ms on CPU. This is a small inference
@@ -249,10 +257,10 @@ were returned on 247 frames, one on 3 frames, with no far/near identity swaps in
 this clip. Reordered detections, changed ByteTrack IDs, short loss/recovery,
 missing court detections and reset were checked in memory without creating files.
 
-A verified court template or manual calibration is still required for homography.
+CourtKeyNet supplies four-corner homography without a separate court template.
 FP16 can slightly change numerical predictions; use `gpu_half = False` for FP32.
 
 The core video path streams frames; Module 2 retains coordinate records in memory.
 Long videos, occlusions and camera cuts can reduce model/tracker accuracy.
-Third-party code and weights retain their own licenses; the court model and
-Ultralytics use AGPL-3.0 terms.
+Third-party code and weights retain their own licenses. CourtKeyNet uses MIT;
+Ultralytics in M1 uses AGPL-3.0 terms.

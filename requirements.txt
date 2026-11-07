@@ -9,3 +9,6 @@ huggingface-hub>=0.25,<2
 lap>=0.5.12
 # RTMPose's platform-specific MMPose/MMCV setup is documented in README.md.
 # TrackNet runs in its own environment when tracknet_python is set.
+
+# CourtKeyNet checkpoint loader (M3; inference architecture is embedded).
+safetensors==0.5.3

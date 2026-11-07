@@ -41,7 +41,7 @@ Match Video
 | 1 | Player Pose Estimation | 2D pose keypoints | RTMPose-L | Pretrained | See Module 1 weights below |
 | 2 | Shuttle Tracking | Ball trajectory detection | TrackNetV3 | Pretrained (fine-tune if needed) | See Module 2 weights below |
 | 2 | Shuttle Tracking | Trajectory gap filling | InpaintNet | Pretrained (fine-tune if needed) | Bundled with TrackNetV3 release |
-| 3 | Court Detection | Keypoint detection on court | YOLO11n-pose (`court_yolo11n_pose`) | Pretrained | https://huggingface.co/Huydinh1205/court_yolo11n_pose |
+| 3 | Court Detection | Keypoint detection on court | CourtKeyNet-Finetuned (once per video) | Pretrained | https://huggingface.co/Cracked-ANJ/CourtKeyNet |
 | 3 | Court 2D Mapping | Perspective transform | OpenCV Homography | No weights (geometry) | `cv2.findHomography` + `cv2.perspectiveTransform` |
 | 4 | Hit Detection | Detect shuttle–racket contact frames | Heuristic / 1D CNN | Train from scratch | ShuttleSet annotations |
 | 5 | Shot Classification | Classify shot type | BST (Badminton Shot Transformer) | Pretrained | See Module 5 weights below |
@@ -101,32 +101,17 @@ Match Video
 
 ---
 
-### Module 3 — Court Keypoint Model
+### Module 3 - CourtKeyNet (fixed camera)
 
-**court_yolo11n_pose** (YOLO11n-pose fine-tuned for badminton courts)
-- HuggingFace: https://huggingface.co/Huydinh1205/court_yolo11n_pose
-- Weights file: `court_yolo11n_pose.pt` (6.72 MB)
-- Architecture: YOLO11n-pose (Ultralytics), task = pose
-- Output: **30 keypoints** per court (`kpt_shape = [30, 3]`), in pixel coordinates
-- Keypoints ordered in a boustrophedon (snake) layout, mappable to real-world court metres for homography
-- Trained on: [Badminton Court Keypoint Dataset](https://universe.roboflow.com/learning-9i34b/badminton-court-keypoint-dataset) (Roboflow), 200 epochs, imgsz=640
-- Metrics: mAP@50 = 0.995, ~0.042 m reprojection error
-- License: AGPL-3.0 (Ultralytics)
-
-**Usage:**
-```python
-from huggingface_hub import hf_hub_download
-from ultralytics import YOLO
-
-weights = hf_hub_download("Huydinh1205/court_yolo11n_pose", "court_yolo11n_pose.pt")
-model = YOLO(weights)
-res = model.predict("frame.jpg", imgsz=640, conf=0.25)[0]
-kpts = res.keypoints.xy  # shape: (num_courts, 30, 2) — pixel coordinates
-```
-
-**Homography (no weights)**
-- OpenCV functions: `cv2.findHomography`, `cv2.warpPerspective`, `cv2.perspectiveTransform`
-- Maps the 30 detected court keypoints → standard 2D top-down court template coordinates
+- Model/weights: https://huggingface.co/Cracked-ANJ/CourtKeyNet
+- Source: https://github.com/adithyanraj03/CourtKeyNet (MIT).
+- Pinned fine-tuned safetensors checkpoint; architecture embedded in detector.py.
+- Four outer corners TL, TR, BR, BL map to the full 6.10 x 13.40 m court.
+- Infer once at `court_init_frame` in FP32, validate geometry, then cache corners/H.
+- M1 uses the same fixed hull; M5 can project ankles using H.
+- Invalid calibration fails; camera movement/cuts require recalibration.
+- Validate with internal court lines, not just the four-point fit residual.
+- Manual calibration remains available. No 30-point template is needed.
 
 ---
 
@@ -177,7 +162,7 @@ Video frames
     ├─[M2]─► Shuttle (x, y) per frame + confidence
     │         └─[M2]─► Inpainted trajectory (gap-filled)
     │
-    ├─[M3]─► Court keypoints (30 points)
+    ├─[M3]─► Court corners (4 points, cached)
     │         └─[M3]─► Homography matrix H (image → 2D court)
     │
     └─────────────────────────────────────────────────────────────────
@@ -236,7 +221,7 @@ git clone https://github.com/qaz812345/TrackNetV3
 - [ ] Run RTMPose — confirm 17 keypoints visible on each player
 - [ ] Run TrackNetV3 — confirm shuttle (x,y) CSV output aligns with timestamps
 - [ ] Run InpaintNet — confirm trajectory gaps are filled
-- [ ] Run court detector — confirm 30 keypoints land on court lines
+- [ ] Run court detector — confirm 4 corners and projected internal lines align
 - [ ] Verify homography by projecting corners to 2D top-down template
 - [ ] Run hit detector — confirm hit events flagged near wrist + shuttle proximity
 - [ ] Run BST — confirm shot labels from {Smash, Clear, Drop, Drive, Lift, Serve}
@@ -250,16 +235,14 @@ git clone https://github.com/qaz812345/TrackNetV3
 - `module2_shuttle/`: separate-process integration with qaz812345/TrackNetV3,
   including InpaintNet, raw/repaired CSV alignment, and explicit missing points.
   The similarly named alenzenx project does not provide this InpaintNet interface.
-- `module3_court/`: 30-keypoint detector and RANSAC homography with validated
+- `module3_court/`: one-shot 4-corner CourtKeyNet and homography with validated
   image-to-court correspondences; manual fixed-camera calibration is also supported.
 - `main.py` selects modules; `pipeline.py` joins outputs by zero-based frame index.
   See `README.md` and `config.py` for setup, settings and commands.
 
 The supplied RTMPose default uses the official COCO RTMPose-L config/checkpoint
 pair. The Body7 checkpoint above requires its matching config if selected.
-The court model card does not specify the exact 30-index metre mapping, so provide
-`court_template` or `court_calibration` to enable physical court coordinates.
-Without either, court detections remain available and the homography is null.
+CourtKeyNet maps four outer corners to known court metres; no template is needed.
 Shuttle confidence is null because the upstream CSV exports visibility only.
 A shuttle homography projection is a floor-plane approximation, not a 3D position.
 The implementation currently stops at Module 3.

@@ -36,16 +36,17 @@ class Settings:
     tracknet_batch_size: int = 8
     tracknet_timeout_seconds: int = 3600
 
-    # Module 3: None downloads court weights from Hugging Face on first use.
+    # Module 3: one-shot CourtKeyNet; None downloads pinned safetensors to temp cache.
     court_weights: str | None = None
-    court_confidence: float = 0.25
+    court_init_frame: int = 0  # Fixed-camera calibration frame, zero-based.
     court_keypoint_confidence: float = 0.5
     court_ransac_threshold_m: float = 0.15
     court_max_error_m: float = 0.2
-    court_template: Path | None = None  # JSON: 30 court points in model index order.
     court_calibration: Path | None = None  # JSON: manual fixed-camera calibration.
 
     def __post_init__(self):
+        if isinstance(self.court_init_frame, bool) or not isinstance(self.court_init_frame, int) or self.court_init_frame < 0:
+            raise ValueError("court_init_frame must be a non-negative integer")
         # Resolve paths from this file, even when launched from another directory.
         for name in (
             "video",
@@ -55,7 +56,6 @@ class Settings:
             "tracknet_repo",
             "tracknet_weights",
             "inpaintnet_weights",
-            "court_template",
             "court_calibration",
         ):
             value = getattr(self, name)
@@ -72,7 +72,6 @@ class Settings:
         for name in (
             "player_confidence",
             "pose_confidence",
-            "court_confidence",
             "court_keypoint_confidence",
         ):
             if not 0 < getattr(self, name) <= 1:

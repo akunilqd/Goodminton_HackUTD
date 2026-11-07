@@ -4,7 +4,7 @@ import argparse
 import importlib.util
 import json
 import logging
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 
 from config import Settings, require_file
@@ -62,7 +62,7 @@ def preflight(settings: Settings, modules: set[str]):
         except ValueError as exc:
             errors.append(str(exc))
     if "3" in modules:
-        from module3_court.detector import ManualCourt, load_template
+        from module3_court.detector import ManualCourt
 
         if settings.court_calibration:
             try:
@@ -70,20 +70,11 @@ def preflight(settings: Settings, modules: set[str]):
             except (OSError, ValueError, KeyError, TypeError) as exc:
                 errors.append(f"court_calibration: {exc}")
         else:
-            packages.add("ultralytics")
+            packages.add("safetensors")
             if not settings.court_weights:
                 packages.add("huggingface_hub")
             else:
                 files.append((Path(settings.court_weights), "court_weights"))
-            try:
-                load_template(settings.court_template)
-            except (OSError, ValueError, KeyError, TypeError) as exc:
-                errors.append(f"court_template: {exc}")
-            if settings.court_template is None:
-                warnings.append(
-                    "court_template is unset: M3 exports 30 keypoints but no homography. "
-                    "Supply verified correspondences or court_calibration for metre coordinates."
-                )
     for package in sorted(packages):
         if importlib.util.find_spec(package) is None:
             errors.append(f"Missing package: {package}; see README.md")
@@ -103,6 +94,7 @@ def build_parser(settings):
         item.add_argument("--modules", nargs="+", choices=["1", "2", "3"], default=list(settings.modules))
         if command == "run":
             item.add_argument("video", type=Path, nargs="?", default=settings.video)
+            item.add_argument("--court-init-frame", type=int, default=settings.court_init_frame)
             item.add_argument("--output", type=Path, default=settings.output, help="New output directory")
     inspect = sub.add_parser("court-frame", help="Export numbered court keypoints for calibration")
     inspect.add_argument("video", type=Path, nargs="?", default=settings.video)
@@ -114,7 +106,7 @@ def build_parser(settings):
 def court_frame(settings, args):
     import cv2
 
-    from module3_court import CourtDetector
+    from module3_court import CourtDetector, ManualCourt
     from pipeline import write_json
     from video import VideoReader
 
@@ -126,7 +118,9 @@ def court_frame(settings, args):
         for index, _, frame in reader:
             if index != args.frame:
                 continue
-            result = CourtDetector(settings).process(frame)
+            detector = (ManualCourt(settings.court_calibration, settings)
+                        if settings.court_calibration else CourtDetector(settings))
+            result = detector.process(frame)
             args.output.mkdir(parents=True, exist_ok=False)
             write_json(
                 args.output / "court.json",
@@ -136,14 +130,10 @@ def court_frame(settings, args):
                     **asdict(result),
                 },
             )
-            for point_id, (x, y, score) in enumerate(result.keypoints):
-                if score < settings.court_keypoint_confidence:
-                    continue
-                point = (round(x), round(y))
-                cv2.circle(frame, point, 4, (0, 255, 255), -1)
-                cv2.putText(
-                    frame, str(point_id), point, cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2
-                )
+            from pipeline import render_frame
+            from schemas import FrameResult
+            render_frame(frame, FrameResult(index, index / reader.info.fps, court=result), [],
+                         court_threshold=settings.court_keypoint_confidence)
             if not cv2.imwrite(str(args.output / "court.jpg"), frame):
                 raise RuntimeError("Could not write court image")
             return
@@ -159,6 +149,8 @@ def main(argv=None):
             court_frame(settings, args)
             print(f"Court inspection saved to {args.output.resolve()}")
             return 0
+        if args.command == "run":
+            settings = replace(settings, court_init_frame=args.court_init_frame)
         modules = set(args.modules)
         report = preflight(settings, modules)
         if args.command == "check":

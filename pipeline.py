@@ -9,6 +9,7 @@ from dataclasses import asdict
 from pathlib import Path
 
 import cv2
+import numpy as np
 
 from module3_court.geometry import on_court, project_point
 from schemas import FrameResult
@@ -45,6 +46,17 @@ def render_frame(frame, result, trail, pose_threshold=0.3, court_threshold=0.5):
                     0.45, color, 1, cv2.LINE_AA)
 
     if result.court is not None:
+        if result.court.homography is not None:
+            inverse = np.linalg.inv(np.asarray(result.court.homography))
+            # Court-floor lines only; net height is not projected onto the floor.
+            lines = [((0, y), (6.10, y)) for y in (0, .76, 4.72, 8.68, 12.64, 13.40)]
+            lines += [((x, 0), (x, 13.40)) for x in (0, .46, 5.64, 6.10)]
+            lines += [((3.05, 0), (3.05, 4.72)), ((3.05, 8.68), (3.05, 13.40))]
+            for a, b in lines:
+                pa, pb = project_point(inverse, a), project_point(inverse, b)
+                if pa is not None and pb is not None:
+                    cv2.line(frame, tuple(round(v) for v in pa), tuple(round(v) for v in pb),
+                             (255, 255, 0), 2, cv2.LINE_AA)
         for index, point in enumerate(result.court.keypoints):
             if visible(point, court_threshold):
                 xy = (round(point[0]), round(point[1]))
@@ -111,7 +123,7 @@ class Pipeline:
                     "m3": self.court is not None,
                 },
                 "processed_frames": 0,
-                "court_coordinates": "metres: x across 6.10m, y along 13.40m; template origin",
+                "court_coordinates": "metres: far-left origin, x across 6.10m, y toward near baseline 13.40m",
                 "shuttle_projection": "court-plane projection; airborne 3D position is unknown",
             }
             metadata_path = output_dir / "metadata.json"
@@ -126,6 +138,22 @@ class Pipeline:
             try:
                 if self.players is not None:
                     self.players.reset()
+                if self.court is not None:
+                    if hasattr(self.court, "reset"):
+                        self.court.reset()
+                    init_index = getattr(getattr(self.court, "settings", None), "court_init_frame", 0)
+                    with VideoReader(video) as calibration_reader:
+                        for frame_index, _, calibration_frame in calibration_reader:
+                            if frame_index == init_index:
+                                self.court.process(calibration_frame)
+                                break
+                        else:
+                            raise ValueError(f"Video has no court initialization frame {init_index}")
+                    metadata["court_calibration"] = {
+                        "mode": "fixed", "frame_index": init_index,
+                        "corner_order": ["TL", "TR", "BR", "BL"],
+                        "fit_error_is_independent_accuracy": False,
+                    }
                 samples = None
                 if self.shuttle is not None:
                     LOGGER.info("Running TrackNet and InpaintNet passes")
@@ -172,6 +200,8 @@ class Pipeline:
                 writer = None
                 LOGGER.info("Annotated video written to %s", video_path)
                 partial.replace(output_dir / "frames.jsonl")
+                if self.court is not None:
+                    metadata["court_model_inferences"] = getattr(self.court, "inference_count", 0)
                 metadata.update(status="complete", processed_frames=count)
             except BaseException as exc:
                 metadata.update(status="failed", processed_frames=count, error=str(exc))
