@@ -24,7 +24,7 @@ HackUTD/
 Use Python 3.10 for the full MMPose stack. Python 3.10–3.11 can run the pinned core pipeline;
 Python 3.14 is not supported by this project's ML dependency setup.
 
-```powershell
+```powershelll
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -r requirements.txt
