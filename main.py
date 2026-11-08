@@ -4,8 +4,7 @@ import argparse
 import importlib.util
 import json
 import logging
-import sys
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 
 from config import DEFAULT_COURT_WEIGHTS, Settings, require_file
@@ -36,6 +35,8 @@ def configure_device(value: str) -> str:
 
 def preflight(settings: Settings, modules: set[str], *, use_saved_court=False):
     errors, warnings = [], []
+    if "4" in modules and not {"1", "2", "3"}.issubset(modules):
+        errors.append("Video M4 requires --modules 1 2 3 4; use detect-hits to replay an existing run.")
     if "1" in modules and "3" not in modules:
         errors.append("Two-player court tracking requires Module 3; use --modules 1 3 (or 1 2 3).")
     packages = set()
@@ -63,7 +64,7 @@ def preflight(settings: Settings, modules: set[str], *, use_saved_court=False):
             devices["2"] = ShuttleTracker(settings).validate()
         except ValueError as exc:
             errors.append(str(exc))
-    if "3" in modules and not use_saved_court:
+    if "3" in modules:
         from module3_court.detector import ManualCourt
 
         if settings.court_calibration:
@@ -73,13 +74,10 @@ def preflight(settings: Settings, modules: set[str], *, use_saved_court=False):
                 errors.append(f"court_calibration: {exc}")
         else:
             packages.add("safetensors")
-            if settings.court_weights:
-                weights = Path(settings.court_weights)
-                if weights.suffix.lower() != ".safetensors":
-                    errors.append("court_weights must be a CourtKeyNet .safetensors checkpoint")
-                files.append((weights, "court_weights"))
-            elif not DEFAULT_COURT_WEIGHTS.is_file():
+            if not settings.court_weights:
                 packages.add("huggingface_hub")
+            else:
+                files.append((Path(settings.court_weights), "court_weights"))
     for package in sorted(packages):
         if importlib.util.find_spec(package) is None:
             errors.append(f"Missing package: {package}; see README.md")
@@ -92,21 +90,28 @@ def preflight(settings: Settings, modules: set[str], *, use_saved_court=False):
 
 
 def build_parser(settings):
-    parser = argparse.ArgumentParser(description="Badminton analysis: Modules 1, 2 and 3")
+    parser = argparse.ArgumentParser(description="Badminton analysis: Modules 1-4")
     sub = parser.add_subparsers(dest="command", required=True)
     for command in ("run", "check"):
         item = sub.add_parser(command)
-        item.add_argument("--modules", nargs="+", choices=["1", "2", "3"], default=["1", "2", "3"])
+        item.add_argument("--modules", nargs="+", choices=["1", "2", "3", "4"], default=list(settings.modules))
         if command == "run":
             item.add_argument("video", type=Path, nargs="?", default=settings.video)
-            item.add_argument("--output", type=Path, default=settings.output,
-                              help="New directory for the final annotated.mp4")
-            item.add_argument("--court-detections", type=Path,
-                              help="Reuse a fixed CourtKeyNet calibration from a prior run of this video")
+            item.add_argument("--court-init-frame", type=int, default=settings.court_init_frame)
+            item.add_argument("--output", type=Path, default=settings.output, help="New output directory")
     inspect = sub.add_parser("court-frame", help="Export numbered court keypoints for calibration")
     inspect.add_argument("video", type=Path, nargs="?", default=settings.video)
     inspect.add_argument("--frame", type=int, default=0)
     inspect.add_argument("--output", type=Path, required=True, help="New output directory")
+    hits = sub.add_parser("detect-hits", help="Run CPU-only M4 on a complete saved M1/M2 run")
+    hits.add_argument("run_dir", type=Path)
+    hits.add_argument("--output", type=Path, required=True, help="New output directory")
+    hits.add_argument("--rallies", type=Path, help="Optional JSON list of inclusive rally frame ranges")
+    review = sub.add_parser("annotate-hits", help="Mark hit JSONL timestamps on a video without inference")
+    review.add_argument("video", type=Path)
+    review.add_argument("--hits", type=Path, required=True)
+    review.add_argument("--output", type=Path, required=True, help="New .mp4 output file")
+    review.add_argument("--hold-seconds", type=float, default=0.16)
     return parser
 
 
@@ -146,7 +151,7 @@ class SavedFixedCourt:
 def court_frame(settings, args):
     import cv2
 
-    from module3_court import CourtDetector
+    from module3_court import CourtDetector, ManualCourt
     from pipeline import write_json
     from video import VideoReader
 
@@ -158,7 +163,9 @@ def court_frame(settings, args):
         for index, _, frame in reader:
             if index != args.frame:
                 continue
-            result = CourtDetector(settings).process(frame)
+            detector = (ManualCourt(settings.court_calibration, settings)
+                        if settings.court_calibration else CourtDetector(settings))
+            result = detector.process(frame)
             args.output.mkdir(parents=True, exist_ok=False)
             write_json(
                 args.output / "court.json",
@@ -168,14 +175,10 @@ def court_frame(settings, args):
                     **asdict(result),
                 },
             )
-            for point_id, (x, y, score) in enumerate(result.keypoints):
-                if score < settings.court_keypoint_confidence:
-                    continue
-                point = (round(x), round(y))
-                cv2.circle(frame, point, 4, (0, 255, 255), -1)
-                cv2.putText(
-                    frame, str(point_id), point, cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2
-                )
+            from pipeline import render_frame
+            from schemas import FrameResult
+            render_frame(frame, FrameResult(index, index / reader.info.fps, court=result), [],
+                         court_threshold=settings.court_keypoint_confidence)
             if not cv2.imwrite(str(args.output / "court.jpg"), frame):
                 raise RuntimeError("Could not write court image")
             return
@@ -186,12 +189,25 @@ def main(argv=None):
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     try:
         settings = Settings()
-        argv = sys.argv[1:] if argv is None else argv
-        args = build_parser(settings).parse_args(argv or ["run"])
+        args = build_parser(settings).parse_args(argv)
+        if args.command == "annotate-hits":
+            from pipeline import annotate_hits
+
+            result = annotate_hits(args.video, args.hits, args.output, args.hold_seconds)
+            print(json.dumps(result, indent=2))
+            return 0
+        if args.command == "detect-hits":
+            from module4 import detect_saved_run
+
+            summary = detect_saved_run(settings, args.run_dir, args.output, args.rallies)
+            print(json.dumps(summary, indent=2))
+            return 0
         if args.command == "court-frame":
             court_frame(settings, args)
             print(f"Court inspection saved to {args.output.resolve()}")
             return 0
+        if args.command == "run":
+            settings = replace(settings, court_init_frame=args.court_init_frame)
         modules = set(args.modules)
         saved_court = None
         if args.command == "run" and args.court_detections is not None:
@@ -226,8 +242,11 @@ def main(argv=None):
                 if settings.court_calibration
                 else CourtDetector(settings)
             )
-        output = Pipeline(players, shuttle, court).run(args.video, args.output)
-        print(f"Video saved to {output}")
+        from module4 import HitDetector
+
+        hits = HitDetector(settings) if "4" in modules else None
+        output = Pipeline(players, shuttle, court, hits).run(args.video, args.output)
+        print(f"Analysis saved to {output}")
         return 0
     except (OSError, ValueError, RuntimeError, ImportError, KeyError, TypeError) as exc:
         logging.error("%s", exc)

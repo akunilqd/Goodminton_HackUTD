@@ -1,6 +1,6 @@
 # Badminton Analysis — Modules 1, 2 and 3
 
-Analyze a badminton video with three independent modules and one Python entry point.
+Analyze a badminton video with four modules and one Python entry point.
 Modules 4–6 (hit detection, shot classification and analytics) are outside this implementation.
 
 ```text
@@ -127,7 +127,7 @@ The adapter runs TrackNet once and passes the trajectory to InpaintNet in memory
 The models run in a separate process with a configurable timeout, and progress
 appears in the terminal. Use `.mp4` input and a new output directory for each run.
 
-### Module 3: court detection and mapping
+### Module 3: CourtKeyNet fixed-camera calibration
 
 [CourtKeyNet](https://huggingface.co/Cracked-ANJ/CourtKeyNet) detects four corners
 in far-left, far-right, near-right, near-left order. It runs once at
@@ -139,18 +139,25 @@ the pinned weights.
 Inspect the corners on a candidate calibration frame:
 
 ```powershell
-python main.py court-frame data/match.mp4 --frame 0 --output outputs/court-inspection
+python -B main.py check --modules 3
+python -B main.py court-frame data/match178_000.mp4 --frame 0 --output outputs/court-inspection-new
+python -B main.py run data/match178_000.mp4 --modules 3 --court-init-frame 0 --output outputs/court-only-new
+python -B main.py run data/match178_000.mp4 --modules 1 2 3 --court-init-frame 0 --output outputs/full-new
 ```
 
 This exports `court.jpg` and `court.json`. Metre coordinates run x across the
 6.10 m doubles width and y along the 13.40 m length from the far-left corner.
 
-For a **fixed camera**, use manual calibration without the court ML model:
+### Module 4: offline hit detection (CPU)
 
-1. Copy `configs/calibration.example.json` to `configs/my_court.json`.
-2. Replace its synthetic pixel coordinates and image dimensions with those from
-   your video. Pair at least four non-collinear image points with court metres.
-3. Set `court_calibration = Path("configs/my_court.json")` in `config.py`.
+`module4/` consumes aligned M1 player poses and M2 shuttle coordinates. It fits
+local before/after velocities, tests direction/velocity changes, checks proximity
+to both wrists normalized by bounding-box diagonal, and suppresses nearby duplicate
+candidates. Short bounded gaps can be interpolated; long gaps and incomplete
+boundary windows are not classified. Possible serves use a rest-to-motion branch.
+Strong trajectory evidence without wrists can produce a hit with an unknown hitter;
+known wrists far from the shuttle reject a candidate. Identity alternation is only
+a review flag, not a forced correction.
 
 The example orders the doubles corners far-left, far-right, near-right, near-left.
 Start a new calibration after a camera move, zoom, or cut. Calibration resolution
@@ -196,7 +203,7 @@ Previous GPU verification with the legacy 30-point detector used the RTX 3050
 
 - `main.py check` reports `cuda:0` for all three modules; `pip check` passes.
 - Before court filtering, M1/M3 inference passed on a real match frame: 8 people, 17 joints per person,
-  and 30 court keypoints. The actual inference models were verified on CUDA;
+  and 4 CourtKeyNet corners. The actual inference models were verified on CUDA;
   both YOLO predictors used FP16. Explicit CPU inference also passed.
 - Before court filtering, after two warm-up iterations, five repeated runs of that frame averaged
   75.64 ms for M1+M3 on GPU versus 1008.51 ms on CPU. This is a small inference

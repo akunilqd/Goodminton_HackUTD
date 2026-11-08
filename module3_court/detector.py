@@ -40,7 +40,7 @@ from torch.nn import functional as F
 
 from config import DEFAULT_COURT_WEIGHTS, Settings, require_file
 from schemas import Court
-from .geometry import COURT_CORNERS_M, fit_homography
+from .geometry import fit_homography
 
 """
 Octave Feature Extractor
@@ -577,6 +577,7 @@ _MODEL_CONFIG = {"model": {
     "transformer": {"num_heads": 4, "dim_feedforward": 512, "dropout": 0.1, "num_layers": 2},
     "qcm": {"hidden_dims": [64, 128]},
 }}
+COURT_CORNERS_M = [(0., 0.), (6.10, 0.), (6.10, 13.40), (0., 13.40)]
 WEIGHTS_REVISION = "8254e285ed0ed496a96fa4632111c80ffb645998"
 
 
@@ -585,13 +586,10 @@ class CourtDetector:
 
     def __init__(self, settings: Settings, model=None):
         self.settings = settings
-        self.init_frame = settings.court_init_frame
         self.device = str(torch.device(settings.device))
         if model is None:
             from safetensors.torch import load_file
             weights = settings.court_weights
-            if weights is None and DEFAULT_COURT_WEIGHTS.is_file():
-                weights = DEFAULT_COURT_WEIGHTS
             if weights is None:
                 from huggingface_hub import hf_hub_download
                 download_args = dict(
