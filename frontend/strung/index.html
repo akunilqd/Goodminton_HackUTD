@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Goodminton — Find the moments that changed the match</title>
+<meta name="description" content="Upload a badminton match to review rally patterns, shot choices, and turning points, strung across the court.">
+<meta name="theme-color" content="#000000">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@500;700;800;900&family=Big+Shoulders+Stencil+Display:wght@800;900&family=Archivo:ital,wdth,wght@0,62..125,400..800;1,62..125,400..700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../assets/css/goodminton.css">
+<link rel="stylesheet" href="strung.css">
+</head>
+<body class="world-strung home">
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="site-nav" data-nav>
+  <div class="wrap">
+    <a class="wordmark" href="index.html" aria-label="Goodminton home"><svg viewBox="0 0 26 34" aria-hidden="true"><ellipse cx="13" cy="12" rx="10.5" ry="10.8" fill="none" stroke="currentColor" stroke-width="2.6"/><path d="M8.5 3v18M13 1.4v21.2M17.5 3v18M3.4 8h19.2M2.6 12h20.8M3.4 16h19.2" stroke="currentColor" stroke-width="1" opacity=".75"/><path d="M13 23v10" stroke="currentColor" stroke-width="3"/></svg><span>GOODMINTON</span></a>
+    <nav class="nav-links" aria-label="Main">
+      <a href="#how" class="hide-s">How it works</a>
+      <a href="#sample" class="hide-s">Sample analysis</a>
+      <a href="library.html" class="signin">Sign in</a>
+      <a href="upload.html" class="btn btn-primary">Analyze a match</a>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+  <!-- hero: a live string bed that straightens into the court -->
+  <section class="strung-hero" data-hero aria-labelledby="hero-h">
+    <div class="stage">
+      <div class="sky" data-sky aria-hidden="true"></div>
+      <span class="shoot" aria-hidden="true"></span>
+      <div class="ink">
+        <h1 id="hero-h">Find the moments that <span class="acc">changed the match.</span></h1>
+      </div>
+      <canvas data-bed aria-hidden="true"></canvas>
+      <div class="over">
+        <div class="plate-top"><span class="spec" data-plate></span></div>
+        <div class="lede-wrap"><p>Upload a badminton match. Every rally comes back strung across the court: patterns, shot choices and the turning points, each linked to the footage.</p></div>
+        <div class="grip" data-grip>
+          <a class="btn btn-primary" href="upload.html">Analyze a match <span class="arrow-ic" aria-hidden="true"><svg viewBox="0 0 20 20"><path d="M3.5 10h12.6M11 5.2l5 4.8-5 4.8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="square" stroke-linejoin="round"/></svg></span></a>
+          <a class="btn" href="#sample">Explore the sample</a>
+          <p class="hint" data-hint aria-hidden="true">Move to pluck · click to serve</p>
+        </div>
+      </div>
+      <div class="morph-cap" data-cap>
+        <h2>Every rally, <em>strung across the court.</em></h2>
+        <p data-cap-text></p>
+        <span class="spec"><i>Illustrative</i> fictional players</span>
+      </div>
+      <div class="morph-key" data-key aria-hidden="true">
+        <div><i></i>The rally’s shuttle path</div>
+        <div><i class="d"></i>Where each shot landed, numbered</div>
+        <div><i class="n"></i>The net</div>
+        <div><i class="w"></i>Court lines, measured in metres</div>
+      </div>
+      <div class="hud" aria-hidden="true">
+        <div class="hud-c tl"><span class="k" data-hud-mode-k>String bed</span><span class="v" data-hud-bed></span></div>
+        <div class="hud-c tr"><span class="k" data-hud-def-k>Max deflection</span><span class="v" data-hud-def><b>0.0</b> mm</span><span class="bar"><i data-hud-meter></i></span></div>
+        <div class="hud-c bl"><span class="k" data-hud-hit-k>Last contact</span><span class="v" data-hud-hit>Click the strings</span></div>
+        <div class="hud-c br"><span class="k">Scroll</span><span class="v scroll-cue" data-hud-cue>String the court <i></i></span></div>
+      </div>
+      <span class="rail l" aria-hidden="true">Badminton match analysis</span>
+      <span class="rail r" aria-hidden="true">Sample · illustrative data</span>
+    </div>
+  </section>
+
+  <!-- sample analysis -->
+  <section class="s-section on-graphite board-ground" id="sample" aria-labelledby="sample-h">
+    <div class="wrap">
+      <div class="s-head">
+        <h2 id="sample-h">One match, read rally by rally.</h2>
+        <div class="side">
+          <p>This is the report itself. Pick a game, select any rally on the timeline, and watch its path draw on the court. The data is illustrative: a sample match between two fictional players.</p>
+          <span class="spec" data-sample-plate></span>
+        </div>
+      </div>
+      <div data-sample></div>
+      <p style="margin-top:40px"><a class="btn" href="report.html">Open the full sample report <span class="arrow-ic" aria-hidden="true"><svg viewBox="0 0 20 20"><path d="M3.5 10h12.6M11 5.2l5 4.8-5 4.8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="square" stroke-linejoin="round"/></svg></span></a></p>
+    </div>
+  </section>
+
+  <div class="ticker" aria-hidden="true"><div class="ticker-track" data-ticker></div></div>
+
+  <!-- how it works -->
+  <section class="s-section on-cobalt" id="how" aria-labelledby="how-h">
+    <div class="wrap">
+      <div class="s-head">
+        <h2 id="how-h">Strung in three passes.</h2>
+        <div class="side">
+          <p>Upload, tracking, review. Where the system isn’t sure, the report says so, and estimated shots are drawn differently from tracked ones.</p>
+          <span class="spec"><i>Formats</i> MP4 · MOV <b>/</b> up to 4 GB</span>
+        </div>
+      </div>
+      <ol class="s-steps axis">
+        <li><span class="n" aria-hidden="true">1</span><h3>Upload a match recording</h3><p>A single fixed camera behind a baseline works best, with all four court corners in view.</p><svg data-step="upload" aria-hidden="true"></svg></li>
+        <li><span class="n" aria-hidden="true">2</span><h3>Play is tracked into rallies</h3><p>The court lines set the scale. Players and shuttle are tracked, and play is split into rallies with a rebuilt score.</p><svg data-step="track" aria-hidden="true"></svg></li>
+        <li><span class="n" aria-hidden="true">3</span><h3>Review what to rewatch</h3><p>Find the runs that swung a game, open any rally at its timestamp, and save the moments worth a second look.</p><svg data-step="review" aria-hidden="true"></svg></li>
+      </ol>
+      <div class="specsheet">
+        <div>
+          <h3>Spec sheet</h3>
+          <p class="note">Provisional. These limits will be confirmed once the processing service has been measured on real recordings.</p>
+        </div>
+        <dl>
+          <dt>Formats</dt><dd>MP4 or MOV, up to 4 GB and 120 minutes</dd>
+          <dt>Processing</dt><dd><em>Not yet measured.</em> You see each step as it runs, and you can leave the page.</dd>
+          <dt>Recording</dt><dd>One fixed, raised camera; whole court in frame; 720p and 30 fps or better</dd>
+          <dt>Match type</dt><dd>Singles only in this version</dd>
+          <dt>Known gaps</dt><dd>Fast exchanges can lose the shuttle; those shots are marked “estimated”. Shot types are labelled from flight and landing, so check them against the footage.</dd>
+        </dl>
+      </div>
+    </div>
+  </section>
+
+  <div class="ticker rev" aria-hidden="true"><div class="ticker-track" data-ticker></div></div>
+
+  <!-- upload -->
+  <section class="s-section on-graphite board-ground" id="upload" aria-labelledby="up-h">
+    <div class="wrap">
+      <div class="s-head">
+        <h2 id="up-h">Drop it on the strings.</h2>
+        <div class="side">
+          <p>Drop a recording and name the two players. When the upload finishes, you go straight to the analysis as it runs.</p>
+          <span class="spec"><i>Max</i> 4 GB <b>/</b> 120 min</span>
+        </div>
+      </div>
+      <div data-upload></div>
+    </div>
+  </section>
+
+  <section class="s-close" aria-labelledby="close-h">
+    <div class="floor" aria-hidden="true"><svg viewBox="-0.2 -0.2 6.5 13.8"><g fill="none" stroke="#7828ff" stroke-width=".05"><rect x="0" y="0" width="6.1" height="13.4"/><path d="M0.46 0V13.4M5.64 0V13.4M0 0.76H6.1M0 12.64H6.1M0 4.72H6.1M0 8.68H6.1M3.05 0V4.72M3.05 8.68V13.4"/></g><path d="M-0.15 6.7H6.25" stroke="#ff2ee6" stroke-width=".09"/></svg></div>
+    <span class="spec tape-label" aria-hidden="true"><i>Court</i> 6.10 × 13.40 m</span>
+    <div class="wrap">
+      <div class="card">
+        <span class="spec"><i>Next</i> upload <b>/</b> MP4 · MOV <b>/</b> up to 4 GB</span>
+        <h2 id="close-h">Your next match is <em>already</em> on someone’s phone.</h2>
+        <p>Point a camera at the court, then bring the recording here. The rallies, runs and patterns will be waiting.</p>
+        <div class="hero-actions" style="justify-content:center">
+          <a class="btn btn-primary" href="upload.html">Analyze a match</a>
+          <a class="btn" href="report.html">Sample report</a>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="site-foot">
+  <div class="wrap">
+    <div>
+      <a class="wordmark" href="index.html" aria-label="Goodminton home" style="margin-bottom:12px"><svg viewBox="0 0 26 34" aria-hidden="true"><ellipse cx="13" cy="12" rx="10.5" ry="10.8" fill="none" stroke="currentColor" stroke-width="2.6"/><path d="M8.5 3v18M13 1.4v21.2M17.5 3v18M3.4 8h19.2M2.6 12h20.8M3.4 16h19.2" stroke="currentColor" stroke-width="1" opacity=".75"/><path d="M13 23v10" stroke="currentColor" stroke-width="3"/></svg><span>GOODMINTON</span></a>
+      <p>Badminton match analysis. The sample match uses illustrative data and fictional players; the footage is a placeholder.</p>
+      <span class="spec" style="margin-top:14px"><i>Sample</i> illustrative <b>/</b> fictional players <b>/</b> placeholder footage</span>
+    </div>
+    <nav aria-label="Footer"><a href="#how">How it works</a><a href="report.html">Sample report</a><a href="library.html">Match library</a><a href="upload.html">Upload</a></nav>
+  </div>
+</footer>
+
+<script src="../assets/js/data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/board.js"></script>
+<script src="../assets/js/upload.js"></script>
+<script src="strung-home.js"></script>
+</body>
+</html>
