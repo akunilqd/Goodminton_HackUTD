@@ -462,7 +462,7 @@ body.world-strung { font-family: var(--f-text); font-stretch: 100%; background: 
 /* full-screen overlay, neon skin */
 .world-strung .fs-shell { background: radial-gradient(ellipse 80% 40% at 50% 108%, rgba(120, 40, 255, .35), transparent 70%), #000; }
 .world-strung .fs-map, .world-strung .fs-live { border-color: rgba(120, 40, 255, .45); box-shadow: 0 20px 50px -24px rgba(120, 40, 255, .7); }
-@supports (backdrop-filter: blur(8px)) { .world-strung .fs-map, .world-strung .fs-live { background: rgba(5, 3, 10, .58); } }
+@supports (backdrop-filter: blur(8px)) { .world-strung .fs-map, .world-strung .fs-live { background: rgba(5, 3, 10, .78); } }
 .world-strung .fs-map::before, .world-strung .fs-live::before { content: ''; position: absolute; left: -1px; right: -1px; top: -1px; height: 2px; background: linear-gradient(90deg, var(--violet), var(--magenta)); }
 .world-strung .fs-k { color: var(--lavender); }
 .world-strung .player.is-fs .player-controls { background: rgba(5, 3, 10, .9); }
@@ -501,3 +501,7 @@ body.world-strung { font-family: var(--f-text); font-stretch: 100%; background: 
 .run-open { margin: 18px 0 0; }
 [data-report-status]:not(:empty) { padding-top: 40px; padding-bottom: 96px; }
 .is-live-report .fact::before { content: "Estimated"; }
+
+/* real footage takes the frame; the score bug and overlays sit above it */
+.player-frame .footage { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #000; }
+.run-video { display: block; width: 100%; max-height: 70vh; background: #000; margin-top: 24px; }

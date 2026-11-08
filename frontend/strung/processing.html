@@ -61,7 +61,7 @@
           <p>Processing stops and the uploaded video is deleted. You’d need to upload it again.</p>
           <div class="hero-actions"><button class="btn" type="button" data-confirm-yes>Yes, cancel and delete</button><button class="btn btn-quiet" type="button" data-confirm-no>Keep processing</button></div>
         </div>
-        <p class="small muted">Prototype: these steps are simulated, and the finished analysis opens the sample report. Add <code>?fail=1</code> to the address to see the failure state.</p>
+        <p class="small muted" data-prototype>Prototype: these steps are simulated, and the finished analysis opens the sample report. Add <code>?fail=1</code> to the address to see the failure state.</p>
       </div>
     </div>
   </div>
@@ -76,6 +76,7 @@
 
 <script src="../assets/js/data.js"></script>
 <script src="../assets/js/app.js"></script>
+<script src="../assets/js/pipeline.js"></script>
 <script>
 (function () {
   var M = GM_MATCH, q = new URLSearchParams(location.search);
@@ -84,13 +85,23 @@
   var a = q.get('a') || 'Near-side player', b = q.get('b') || 'Far-side player';
   var len = +q.get('len') || null;
   var fail = q.get('fail');
+  var jobId = q.get('job');
 
   document.querySelector('[data-title]').textContent = a + ' v ' + b;
   document.title = 'Analysing ' + a + ' v ' + b + ' — Goodminton';
   var gb = size >= 1e9 ? (size / 1e9).toFixed(2).replace(/\.?0+$/, '') + ' GB' : Math.round(size / 1e6) + ' MB';
   document.querySelector('[data-facts]').innerHTML = '<span><b>' + file.replace(/</g, '&lt;') + '</b></span><span class="num">' + gb + (len ? ' · ' + M.util.fmtTime(len) : '') + '</span><span>Singles</span>';
 
-  var STEPS = [
+  var REAL_STEPS = [
+    { key: 'received', t: 'Upload received', d: 'The video is saved on the analysis computer.' },
+    { key: 'checking', t: 'Checking the setup', d: 'Models, weights and the video file.' },
+    { key: 'court', t: 'Finding the court lines', d: 'The lines set the scale, so positions can be measured in metres.' },
+    { key: 'tracking', t: 'Tracking players and shuttle', d: 'Usually the longest step, and it can take a long time on a full match.' },
+    { key: 'hits', t: 'Detecting hits', d: 'Finding each moment the shuttle was struck.' },
+    { key: 'shots', t: 'Classifying shots', d: 'Labelling each hit as a smash, clear, drop, drive, net shot or serve.' },
+    { key: 'publishing', t: 'Counting rallies and publishing', d: 'Splitting play into rallies and saving the results.' }
+  ];
+  var STEPS = jobId ? REAL_STEPS : [
     { t: 'Upload received', d: 'File stored and checked for completeness.', s: 1.2 },
     { t: 'Checking the recording', d: 'Resolution, frame rate, and whether all four court corners are in view.', s: 2.6 },
     { t: 'Finding the court lines', d: 'The lines set the scale, so positions can be measured in metres.', s: 3.2, failHere: true },
@@ -118,6 +129,91 @@
     li.querySelector('.i').innerHTML = ICONS[state];
     li.querySelector('.s').textContent = text;
     if (state === 'active') li.setAttribute('aria-current', 'step'); else li.removeAttribute('aria-current');
+  }
+
+  if (jobId) { runRealJob(); return; }
+
+  function runRealJob() {
+    var P = GM.pipeline, misses = 0, timer = null, finished = false;
+    var outcomeBox = document.querySelector('[data-outcome]'), actions = document.querySelector('[data-actions]'), cnt = document.querySelector('[data-count]');
+    var note = document.querySelector('[data-strip-note]'), elapsed = document.querySelector('[data-elapsed]'), proto = document.querySelector('[data-prototype]');
+    var title = document.querySelector('[data-title]'), facts = document.querySelector('[data-facts]');
+    var started = Date.now(), named = false;
+    if (proto) proto.hidden = true;
+    cnt.textContent = '–';
+    note.textContent = 'The count appears once the video has been tracked and split into rallies.';
+    title.textContent = 'Analysing your match';
+    facts.textContent = '';
+
+    function notice(heading, body, links, ok) {
+      outcomeBox.textContent = '';
+      var box = document.createElement('div'); box.className = 'notice' + (ok ? ' notice-ok' : '');
+      var h2 = document.createElement('h2'); h2.textContent = heading; box.appendChild(h2);
+      var p = document.createElement('p'); p.textContent = body; box.appendChild(p);
+      if (links && links.length) {
+        var row = document.createElement('div'); row.className = 'hero-actions';
+        links.forEach(function (l, i) { var a = document.createElement('a'); a.className = 'btn' + (i ? '' : ' btn-primary'); a.href = l[1]; a.textContent = l[0]; row.appendChild(a); });
+        box.appendChild(row);
+      }
+      outcomeBox.appendChild(box);
+    }
+    function paint(job) {
+      if (!named) {
+        named = true;
+        if (job.near && job.far) { title.textContent = job.near + ' v ' + job.far; document.title = 'Analysing ' + job.near + ' v ' + job.far + ' — Goodminton'; }
+        var s = document.createElement('span'), b = document.createElement('b'); b.textContent = job.filename; s.appendChild(b); facts.appendChild(s);
+      }
+      var active = job.status === 'queued' ? 0 : -1;
+      REAL_STEPS.forEach(function (st, i) { if (st.key === job.stage) active = i; });
+      if (job.status === 'complete') active = REAL_STEPS.length;
+      REAL_STEPS.forEach(function (st, i) {
+        if (i < active || (i === 0 && job.status !== 'queued')) setRow(i, 'done', 'Done');
+        else if (i === active && job.status === 'running') setRow(i, 'active', 'Running');
+        else if (i === active && job.status === 'failed') setRow(i, 'error', 'Stopped');
+        else setRow(i, 'todo', job.status === 'cancelled' ? 'Cancelled' : (job.status === 'queued' && i === 0 ? 'In queue' : 'Waiting'));
+      });
+    }
+    function complete(job) {
+      var wizard2 = document.querySelector('[data-wiz2]'), wizard3 = document.querySelector('[data-wiz3]');
+      wizard2.removeAttribute('aria-current'); wizard2.classList.add('done'); wizard3.setAttribute('aria-current', 'step');
+      actions.hidden = true;
+      var info = job.rallies || { rallies: 0, decided: 0 }, runUrl = 'run.html?id=' + encodeURIComponent(job.id);
+      cnt.textContent = info.rallies;
+      note.textContent = info.decided + ' of ' + info.rallies + ' had a clear result.';
+      var links = info.decided ? [['Open the full report', 'report.html?run=' + encodeURIComponent(job.id)], ['See this run', runUrl]] : [['See this run', runUrl]];
+      if (job.warnings && job.warnings.length) {
+        notice('Analysed, but not fully published', 'The analysis finished, but some results couldn’t be saved to the database, so this run may be missing or incomplete. Check the SpacetimeDB login on the analysis computer.', links);
+        return;
+      }
+      notice('Analysis ready', info.rallies + (info.rallies === 1 ? ' rally' : ' rallies') + ' found in your video.', links, true);
+      outcomeBox.querySelector('a').focus();
+    }
+    function tick() {
+      P.job(jobId).then(function (job) {
+        misses = 0;
+        if (outcomeBox.querySelector('[data-lost]')) outcomeBox.textContent = '';
+        paint(job);
+        elapsed.textContent = M.util.fmtTime((Date.now() - started) / 1000) + ' on this page';
+        if (job.status === 'complete') { finished = true; complete(job); return; }
+        if (job.status === 'failed') { finished = true; actions.hidden = true; notice('The analysis stopped', job.error || 'Something went wrong.', [['Try another video', 'upload.html']]); return; }
+        if (job.status === 'cancelled') { finished = true; actions.hidden = true; notice('Analysis cancelled', 'Processing stopped and the video was deleted.', [['Upload another video', 'upload.html']]); return; }
+        timer = setTimeout(tick, 2000);
+      }, function (err) {
+        if (err.status === 404) { finished = true; actions.hidden = true; notice('Analysis not found', 'This analysis doesn’t exist on the server.', [['Upload a video', 'upload.html']]); return; }
+        misses++;
+        if (misses >= 3) { notice('Lost contact with the analysis server', 'Still trying. The analysis keeps running as long as “python server.py” stays open.'); outcomeBox.firstChild.setAttribute('data-lost', ''); }
+        timer = setTimeout(tick, 4000);
+      });
+    }
+    var confirmEl = document.querySelector('[data-confirm]');
+    document.querySelector('[data-cancel]').addEventListener('click', function () { confirmEl.hidden = false; confirmEl.querySelector('[data-confirm-no]').focus(); });
+    document.querySelector('[data-confirm-no]').addEventListener('click', function () { confirmEl.hidden = true; });
+    document.querySelector('[data-confirm-yes]').addEventListener('click', function () {
+      confirmEl.hidden = true;
+      clearTimeout(timer);
+      P.cancel(jobId).then(tick, function (err) { notice('Couldn’t cancel', err.message); if (!finished) timer = setTimeout(tick, 2000); });
+    });
+    tick();
   }
 
   var strip = document.querySelector('[data-strip]'), count = document.querySelector('[data-count]'), elapsedEl = document.querySelector('[data-elapsed]');
