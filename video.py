@@ -1,6 +1,8 @@
 """Bounded-memory video decoding with explicit frame indices and CFR timestamps."""
 
 import math
+from collections import deque
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -58,3 +60,44 @@ class VideoReader:
     def __exit__(self, *_):
         self.capture.release()
         self.capture = None
+
+
+def read_ahead(frames, pool, depth=16):
+    """Yield `frames` in order while single-threaded `pool` decodes the next `depth`."""
+    source = iter(frames)
+    pending = deque(pool.submit(next, source, None) for _ in range(depth))
+    while (item := pending.popleft().result()) is not None:
+        pending.append(pool.submit(next, source, None))
+        yield item
+
+
+class BackgroundWriter:
+    """Own an H.264 VideoWriter on one thread; work stays ordered and errors reach the caller."""
+
+    def __init__(self, path: Path, fps: float, size: tuple[int, int], backlog=32):
+        self.path, self.fps, self.size, self.backlog = path, fps, size, backlog
+        self.pending = deque()
+
+    def __enter__(self):
+        self.pool = ThreadPoolExecutor(1)
+        self.writer = self.pool.submit(
+            cv2.VideoWriter, str(self.path), cv2.VideoWriter_fourcc(*"avc1"), self.fps, self.size,
+        ).result()
+        if not self.writer.isOpened():
+            self.pool.shutdown()
+            raise RuntimeError(f"Cannot open video writer: {self.path}")
+        return self
+
+    def submit(self, work, *args):
+        """Queue `work(writer, *args)`, waiting when the encoder falls behind."""
+        self.pending.append(self.pool.submit(work, self.writer, *args))
+        while len(self.pending) > self.backlog:
+            self.pending.popleft().result()
+
+    def __exit__(self, error_type, *_):
+        try:
+            while error_type is None and self.pending:
+                self.pending.popleft().result()
+        finally:
+            self.pool.submit(self.writer.release).result()
+            self.pool.shutdown()

@@ -16,6 +16,7 @@ __pycache__/
 *.pyd
 .venv/
 venv/
+.venv-setup/
 *.egg-info/
 
 # Node / SpacetimeDB module
@@ -25,3 +26,6 @@ rallymirror-backend/spacetimedb/node_modules/
 .env
 .env.*
 *.partial.jsonl
+
+# Uploaded videos and job state (server.py)
+jobs/

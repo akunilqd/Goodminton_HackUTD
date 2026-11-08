@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Goodminton — Find the moments that changed the match</title>
+<meta name="description" content="Upload a badminton match to review rally patterns, shot choices, and turning points on the court.">
+<meta name="theme-color" content="#f1ede5">
+<link rel="icon" href="assets/img/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..900&family=Schibsted+Grotesk:ital,wght@0,400..800;1,400..800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/css/goodminton.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="site-nav">
+  <div class="wrap">
+    <a class="wordmark" href="index.html" aria-label="Goodminton home">
+      <svg viewBox="0 0 22 30" aria-hidden="true"><rect x="1.5" y="1.5" width="19" height="27" fill="none" stroke="#1d6b49" stroke-width="2"/><path d="M1.5 6.5h19M1.5 23.5h19M11 1.5v8M11 20.5v8M1.5 10.5h19M1.5 19.5h19" stroke="#1d6b49" stroke-width="1.1" fill="none"/><path d="M0 15h22" stroke="#141a24" stroke-width="3"/></svg>
+      <span>Goodminton</span>
+    </a>
+    <nav class="nav-links" aria-label="Main">
+      <a href="#how" class="hide-s">How it works</a>
+      <a href="#sample" class="hide-s">Sample analysis</a>
+      <a href="upload.html" class="btn btn-primary">Analyze a match</a>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+  <!-- hero -->
+  <section class="hero" aria-labelledby="hero-h">
+    <div class="wrap">
+      <h1 id="hero-h">Find the moments that changed the match.</h1>
+      <div class="hero-row">
+        <p class="lede">Upload a badminton match to review rally patterns, shot choices, and turning points, each one linked back to the footage.</p>
+        <div class="hero-actions">
+          <a class="btn btn-primary" href="upload.html">Analyze a match <span class="arrow-ic" aria-hidden="true"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3.5 10h12.6M11 5.2l5 4.8-5 4.8" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="square" stroke-linejoin="round"/></svg></span></a>
+          <a class="btn" href="report.html">Explore a sample report</a>
+        </div>
+      </div>
+    </div>
+    <div class="wrap">
+      <figure class="still" data-still style="margin-bottom:0">
+        <div class="bug" aria-hidden="true"></div>
+        <div class="placeholder-label">Footage placeholder · sample still</div>
+        <div class="stamp" aria-hidden="true"></div>
+        <div class="callout-card" aria-hidden="true"></div>
+      </figure>
+      <div class="still-caption">
+        <p>Sample match, Game 2. The rally’s path is traced on the floor: each dot is where a shot was hit or landed.</p>
+        <p>Illustrative data · fictional players · footage placeholder</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- sample analysis -->
+  <section class="section" id="sample" aria-labelledby="sample-h">
+    <div class="wrap">
+      <div class="section-head">
+        <h2 id="sample-h">One match, read rally by rally.</h2>
+        <p>This is the report itself, not a picture of it. Pick a game, select any rally on the timeline, and watch its path draw on the court. All the data is illustrative, from a sample match between two fictional players.</p>
+      </div>
+      <div data-sample></div>
+      <p style="margin-top:36px"><a class="btn" href="report.html">Open the full sample report <span class="arrow-ic" aria-hidden="true"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3.5 10h12.6M11 5.2l5 4.8-5 4.8" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="square" stroke-linejoin="round"/></svg></span></a></p>
+    </div>
+  </section>
+
+  <!-- how it works -->
+  <section class="section" id="how" aria-labelledby="how-h" style="padding-top:0">
+    <div class="wrap">
+      <div class="court-rule" style="margin-bottom:clamp(64px,9vw,120px)"></div>
+      <div class="section-head">
+        <h2 id="how-h">How analysis works</h2>
+        <p>Three steps, described plainly. Where the system is unsure, the report says so, and estimated shots are drawn differently from tracked ones.</p>
+      </div>
+      <ol class="steps">
+        <li>
+          <span class="n" aria-hidden="true">1</span>
+          <h3>Upload a match recording</h3>
+          <p>A single fixed camera behind a baseline works best, with all four court corners in view.</p>
+          <figure data-step="upload"></figure>
+        </li>
+        <li>
+          <span class="n" aria-hidden="true">2</span>
+          <h3>Play is tracked and organised into rallies</h3>
+          <p>The court lines set the scale. Players and shuttle are tracked, and play is split into rallies with a rebuilt score.</p>
+          <figure data-step="track"></figure>
+        </li>
+        <li>
+          <span class="n" aria-hidden="true">3</span>
+          <h3>Review, inspect, choose what to rewatch</h3>
+          <p>Find the runs that swung a game, open any rally at its timestamp, and save the moments worth a second look.</p>
+          <figure data-step="review"></figure>
+        </li>
+      </ol>
+
+      <div class="limits">
+        <div>
+          <h3>What to expect</h3>
+          <p class="muted small" style="margin-top:8px;max-width:38ch">These limits are provisional. They will be confirmed once the processing service has been measured on real recordings.</p>
+        </div>
+        <dl>
+          <dt>Video formats</dt><dd>MP4 or MOV, up to 4 GB and 120 minutes</dd>
+          <dt>Processing time</dt><dd><span class="pending">Not yet measured.</span> You’ll see each step as it runs, and you can leave the page.</dd>
+          <dt>Recording</dt><dd>One fixed, raised camera; whole court in frame; 720p and 30 fps or better</dd>
+          <dt>Match type</dt><dd>Singles only in this version</dd>
+          <dt>Known gaps</dt><dd>Fast exchanges can lose the shuttle; those shots are marked “estimated”. Shot types are labelled from flight and landing, so check them against the footage.</dd>
+        </dl>
+      </div>
+    </div>
+  </section>
+
+  <!-- upload -->
+  <section class="section" id="upload" aria-labelledby="up-h" style="padding-top:0">
+    <div class="wrap">
+      <div class="court-rule" style="margin-bottom:clamp(64px,9vw,120px)"></div>
+      <div class="section-head">
+        <h2 id="up-h">Start with one match.</h2>
+        <p>Drop a recording and name the two players. When the upload finishes, you go straight to the analysis as it runs.</p>
+      </div>
+      <div data-upload></div>
+    </div>
+  </section>
+
+  <section class="close" aria-labelledby="close-h">
+    <svg class="close-lines" viewBox="0 0 1340 610" preserveAspectRatio="none" aria-hidden="true">
+      <rect x="40" y="30" width="1260" height="550"/>
+      <line x1="40" y1="76" x2="1300" y2="76"/><line x1="40" y1="534" x2="1300" y2="534"/>
+      <line x1="112" y1="30" x2="112" y2="580"/><line x1="1228" y1="30" x2="1228" y2="580"/>
+      <line x1="472" y1="30" x2="472" y2="580"/><line x1="868" y1="30" x2="868" y2="580"/>
+      <line x1="112" y1="305" x2="472" y2="305"/><line x1="868" y1="305" x2="1228" y2="305"/>
+      <line x1="670" y1="10" x2="670" y2="600" style="stroke-width:3;stroke:rgba(246,243,235,.6)"/>
+    </svg>
+    <div class="wrap">
+      <div>
+        <h2 id="close-h">Your next match is already on someone’s phone.</h2>
+        <p>Point a camera at the court, then bring the recording here. The rallies, runs and patterns will be waiting.</p>
+      </div>
+      <div class="hero-actions">
+        <a class="btn btn-primary" href="upload.html">Analyze a match <span class="arrow-ic" aria-hidden="true"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3.5 10h12.6M11 5.2l5 4.8-5 4.8" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="square" stroke-linejoin="round"/></svg></span></a>
+        <a class="btn" href="report.html">Sample report</a>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="site-foot" style="margin-top:0">
+  <div class="wrap">
+    <div>
+      <a class="wordmark" href="index.html" aria-label="Goodminton home" style="margin-bottom:12px">
+        <svg viewBox="0 0 22 30" aria-hidden="true"><rect x="1.5" y="1.5" width="19" height="27" fill="none" stroke="#1d6b49" stroke-width="2"/><path d="M1.5 6.5h19M1.5 23.5h19M11 1.5v8M11 20.5v8M1.5 10.5h19M1.5 19.5h19" stroke="#1d6b49" stroke-width="1.1" fill="none"/><path d="M0 15h22" stroke="#141a24" stroke-width="3"/></svg>
+        <span>Goodminton</span>
+      </a>
+      <p>Badminton match analysis. The sample match on this site uses illustrative data and fictional players; the footage is a placeholder.</p>
+    </div>
+    <nav aria-label="Footer">
+      <a href="#how">How it works</a>
+      <a href="report.html">Sample report</a>
+      <a href="library.html">Match library</a>
+      <a href="upload.html">Upload</a>
+    </nav>
+  </div>
+</footer>
+
+<script src="assets/js/data.js"></script>
+<script src="assets/js/app.js"></script>
+<script src="assets/js/board.js"></script>
+<script src="assets/js/pipeline.js"></script>
+<script src="assets/js/upload.js"></script>
+<script src="assets/js/home.js"></script>
+</body>
+</html>

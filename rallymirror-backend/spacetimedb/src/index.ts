@@ -1,4 +1,4 @@
-﻿import { schema, table, t } from 'spacetimedb/server';
+﻿import { schema, table, t, SenderError } from 'spacetimedb/server';
 
 // ── Tables ─────────────────────────────────────────────────────────────────
 
@@ -14,6 +14,8 @@ const runMeta = table(
     fps: t.f32(),
     totalFrames: t.u32(),
     createdAt: t.u64(),
+    nearName: t.string().default(""),
+    farName: t.string().default(""),
   }
 );
 
@@ -81,20 +83,61 @@ const summary = table(
   }
 );
 
+/**
+ * One row per rally (M7). winnerId 0 and outcome "unknown" mean no landing was
+ * seen, so no point was awarded. landingX/Y are 0 when there was no landing.
+ */
+const rally = table(
+  { name: 'rally', public: true },
+  {
+    id: t.u64().primaryKey().autoInc(),
+    runId: t.string().index('btree'),
+    rallyIndex: t.u32(),
+    game: t.u32(),
+    startFrame: t.u32(),
+    endFrame: t.u32(),
+    startS: t.f32(),
+    endS: t.f32(),
+    shotCount: t.u32(),
+    firstEventId: t.u32(),
+    lastEventId: t.u32(),
+    lastHitterId: t.u32(),
+    winnerId: t.u32(),
+    outcome: t.string(),   // "winner", "net", "out" or "unknown"
+    landingX: t.f32(),
+    landingY: t.f32(),
+    scoreP1: t.u32(),      // Score after this rally.
+    scoreP2: t.u32(),
+    scoreReliable: t.bool(),
+  }
+);
+
+/**
+ * The analysed video (M5 overlay), split into chunks by the pipeline and
+ * reassembled by appendAnalyzedVideo. One row per run.
+ */
+const analyzedVideo = table(
+  { name: 'analyzed_video', public: true },
+  {
+    runId: t.string().primaryKey(),
+    video: t.byteArray(),
+  }
+);
+
 // ── Schema ─────────────────────────────────────────────────────────────────
 
-const spacetimedb = schema({ runMeta, runningDetails, shotClass, summary });
+const spacetimedb = schema({ runMeta, runningDetails, shotClass, summary, rally, analyzedVideo });
 export default spacetimedb;
 
 // ── Reducers ───────────────────────────────────────────────────────────────
 
 export const upsertRunMeta = spacetimedb.reducer(
-  { runId: t.string(), videoSource: t.string(), fps: t.f32(), totalFrames: t.u32(), createdAt: t.u64() },
-  (ctx, { runId, videoSource, fps, totalFrames, createdAt }) => {
+  { runId: t.string(), videoSource: t.string(), fps: t.f32(), totalFrames: t.u32(), createdAt: t.u64(), nearName: t.string(), farName: t.string() },
+  (ctx, { runId, videoSource, fps, totalFrames, createdAt, nearName, farName }) => {
     if (ctx.db.runMeta.runId.find(runId)) {
-      ctx.db.runMeta.runId.update({ runId, videoSource, fps, totalFrames, createdAt });
+      ctx.db.runMeta.runId.update({ runId, videoSource, fps, totalFrames, createdAt, nearName, farName });
     } else {
-      ctx.db.runMeta.insert({ runId, videoSource, fps, totalFrames, createdAt });
+      ctx.db.runMeta.insert({ runId, videoSource, fps, totalFrames, createdAt, nearName, farName });
     }
   }
 );
@@ -161,6 +204,49 @@ export const setSummary = spacetimedb.reducer(
   }
 );
 
+export const addRally = spacetimedb.reducer(
+  {
+    runId: t.string(), rallyIndex: t.u32(), game: t.u32(),
+    startFrame: t.u32(), endFrame: t.u32(), startS: t.f32(), endS: t.f32(),
+    shotCount: t.u32(), firstEventId: t.u32(), lastEventId: t.u32(),
+    lastHitterId: t.u32(), winnerId: t.u32(), outcome: t.string(),
+    landingX: t.f32(), landingY: t.f32(),
+    scoreP1: t.u32(), scoreP2: t.u32(), scoreReliable: t.bool(),
+  },
+  (ctx, args) => {
+    ctx.db.rally.insert({ id: 0n, ...args });
+  }
+);
+
+export const clearRallies = spacetimedb.reducer(
+  { runId: t.string() },
+  (ctx, { runId }) => {
+    for (const r of [...ctx.db.rally.runId.filter(runId)]) {
+      ctx.db.rally.id.delete(r.id);
+    }
+  }
+);
+
+export const beginAnalyzedVideo = spacetimedb.reducer(
+  { runId: t.string() },
+  (ctx, { runId }) => {
+    if (ctx.db.analyzedVideo.runId.find(runId)) ctx.db.analyzedVideo.runId.delete(runId);
+    ctx.db.analyzedVideo.insert({ runId, video: new Uint8Array(0) });
+  }
+);
+
+export const appendAnalyzedVideo = spacetimedb.reducer(
+  { runId: t.string(), chunk: t.byteArray() },
+  (ctx, { runId, chunk }) => {
+    const row = ctx.db.analyzedVideo.runId.find(runId);
+    if (!row) throw new SenderError('no analyzed video started for this run');
+    const merged = new Uint8Array(row.video.length + chunk.length);
+    merged.set(row.video, 0);
+    merged.set(chunk, row.video.length);
+    ctx.db.analyzedVideo.runId.update({ runId: row.runId, video: merged });
+  }
+);
+
 export const clearRun = spacetimedb.reducer(
   { runId: t.string() },
   (ctx, { runId }) => {
@@ -170,7 +256,11 @@ export const clearRun = spacetimedb.reducer(
     for (const r of [...ctx.db.shotClass.runId.filter(runId)]) {
       ctx.db.shotClass.id.delete(r.id);
     }
+    for (const r of [...ctx.db.rally.runId.filter(runId)]) {
+      ctx.db.rally.id.delete(r.id);
+    }
     if (ctx.db.summary.runId.find(runId)) ctx.db.summary.runId.delete(runId);
+    if (ctx.db.analyzedVideo.runId.find(runId)) ctx.db.analyzedVideo.runId.delete(runId);
     if (ctx.db.runMeta.runId.find(runId)) ctx.db.runMeta.runId.delete(runId);
   }
 );

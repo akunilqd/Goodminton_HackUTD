@@ -15,7 +15,9 @@ class RTMPose:
         config = require_file(settings.rtmpose_config, "rtmpose_config")
         weights = require_file(settings.rtmpose_weights, "rtmpose_weights")
         try:
-            from mmpose.apis import inference_topdown, init_model
+            from mmengine.dataset import Compose, pseudo_collate
+            from mmengine.registry import init_default_scope
+            from mmpose.apis import init_model
             from mmpose.utils import register_all_modules
         except ImportError as exc:
             raise RuntimeError(
@@ -31,15 +33,26 @@ class RTMPose:
         self.half = settings.gpu_half and self.device.startswith("cuda")
         self.model = init_model(str(config), str(weights), device=self.device)
         self.model.eval()
-        self.inference = inference_topdown
+        init_default_scope(self.model.cfg.get("default_scope", "mmpose"))
+        self.pipeline = Compose(self.model.cfg.test_dataloader.dataset.pipeline)
+        self.collate = pseudo_collate
 
-    def predict(self, frame: np.ndarray, boxes: np.ndarray) -> list[list]:
-        if not len(boxes):
-            return []  # MMPose otherwise treats an empty list as a full-image person.
+    def predict_batch(self, frames: list[np.ndarray], boxes_per_frame: list) -> list[list[list]]:
+        """Pose every box of several frames in one forward pass, as MMPose's topdown API does."""
+        jobs = [(frame, box) for frame, boxes in zip(frames, boxes_per_frame) for box in boxes]
+        if not jobs:
+            return [[] for _ in frames]
+        batch = self.collate([
+            self.pipeline(dict(img=frame, bbox=box[None], bbox_score=np.ones(1, dtype=np.float32),
+                               **self.model.dataset_meta))
+            for frame, box in jobs
+        ])
         with torch.inference_mode(), torch.autocast(
             device_type="cuda", enabled=self.half, dtype=torch.float16
         ):
-            samples = self.inference(self.model, frame, bboxes=boxes, bbox_format="xyxy")
+            samples = self.model.test_step(batch)
+        if len(samples) != len(jobs):
+            raise RuntimeError("RTMPose returned a different number of poses than player boxes")
         poses = []
         for sample in samples:
             instance = sample.pred_instances
@@ -48,7 +61,8 @@ class RTMPose:
             if xy.shape != (17, 2) or scores.shape != (17,):
                 raise ValueError("RTMPose must return 17 COCO body joints per player")
             poses.append(np.column_stack((xy, scores)).tolist())
-        return poses
+        remaining = iter(poses)
+        return [[next(remaining) for _ in boxes] for boxes in boxes_per_frame]
 
 
 def foot_point(box, keypoints, threshold: float):
@@ -130,9 +144,16 @@ class PlayerTracker:
             players.append(candidate['player'])
         return sorted(players, key=lambda p: p.track_id)
 
-    def process(self, frame: np.ndarray, court=None) -> list[Player]:
-        result = self.detector.track(
-            frame,
+    def process_batch(self, frames: list[np.ndarray], courts: list) -> list[list[Player]]:
+        """Track consecutive frames; ByteTrack and identities still advance frame by frame."""
+        if not self.identities:
+            # The court margin depends on whether earlier frames established the players.
+            return [self._track_frames([frame], [court])[0] for frame, court in zip(frames, courts)]
+        return self._track_frames(frames, courts)
+
+    def _track_frames(self, frames, courts):
+        results = self.detector.track(
+            list(frames),
             persist=True,
             tracker="bytetrack.yaml",
             classes=[0],
@@ -140,9 +161,18 @@ class PlayerTracker:
             device=self.device,
             **self.precision,
             verbose=False,
-        )[0]
+        )
+        selections = [self._select_boxes(*item) for item in zip(results, frames, courts)]
+        poses = self.pose.predict_batch(
+            frames, [selection["boxes"] if selection else [] for selection in selections]
+        )
+        return [self._build_players(selection, pose) if selection else []
+                for selection, pose in zip(selections, poses)]
+
+    def _select_boxes(self, result, frame, court):
+        """Keep detections standing on this frame's court; None when no court is usable."""
         if result.boxes is None or len(result.boxes) == 0:
-            return []
+            return None
         boxes = result.boxes.xyxy.cpu().numpy()
         scores = result.boxes.conf.cpu().numpy()
         ids = result.boxes.id
@@ -150,25 +180,26 @@ class PlayerTracker:
         # Use detected image-space court points; no guessed metre correspondence is needed.
         points = np.asarray(court.keypoints if court is not None else [], dtype=np.float32)
         if points.ndim != 2 or points.shape[1] != 3:
-            return []
+            return None
         valid = np.isfinite(points).all(axis=1) & (points[:, 2] >= self.settings.court_keypoint_confidence)
         valid &= np.any(points[:, :2] != 0, axis=1)
         if valid.sum() < 4:
-            return []  # Never fall back to tracking the crowd when the court disappears.
+            return None  # Never fall back to tracking the crowd when the court disappears.
         hull = cv2.convexHull(points[valid, :2])
         if cv2.contourArea(hull) < .02 * frame.shape[0] * frame.shape[1]:
-            return []
+            return None
         scale = float(np.linalg.norm(np.ptp(hull[:, 0, :], axis=0)))
         # Allow a small border tolerance once the two players are established.
         margin = .04 * scale if self.identities else 0.0
         keep = [i for i, box in enumerate(boxes)
                 if cv2.pointPolygonTest(hull, (float((box[0]+box[2])/2), float(box[3])), True) >= -margin]
-        boxes, scores, ids = boxes[keep], scores[keep], [ids[i] for i in keep]
-        poses = self.pose.predict(frame, boxes)
-        if len(poses) != len(boxes):
-            raise RuntimeError("RTMPose returned a different number of poses than player boxes")
+        return dict(boxes=boxes[keep], scores=scores[keep], ids=[ids[i] for i in keep],
+                    hull=hull, scale=scale, margin=margin)
+
+    def _build_players(self, selection, poses):
+        hull, scale, margin = selection["hull"], selection["scale"], selection["margin"]
         candidates = []
-        for box, score, track_id, pose in zip(boxes, scores, ids, poses):
+        for box, score, track_id, pose in zip(selection["boxes"], selection["scores"], selection["ids"], poses):
             keypoints = np.asarray(pose, dtype=float)
             if keypoints.shape != (17, 3) or not np.isfinite(keypoints).all():
                 raise ValueError("Invalid player pose; expected finite (17, 3) keypoints")
