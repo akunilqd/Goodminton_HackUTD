@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Analyze a match — Goodminton</title>
+<meta name="theme-color" content="#000000">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@500;700;800;900&family=Big+Shoulders+Stencil+Display:wght@800;900&family=Archivo:ital,wdth,wght@0,62..125,400..800;1,62..125,400..700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../assets/css/goodminton.css">
+<link rel="stylesheet" href="strung.css">
+</head>
+<body class="world-strung">
+<a class="skip" href="#main">Skip to upload</a>
+<header class="site-nav">
+  <div class="wrap">
+    <a class="wordmark" href="index.html" aria-label="Goodminton home"><svg viewBox="0 0 26 34" aria-hidden="true"><ellipse cx="13" cy="12" rx="10.5" ry="10.8" fill="none" stroke="currentColor" stroke-width="2.6"/><path d="M8.5 3v18M13 1.4v21.2M17.5 3v18M3.4 8h19.2M2.6 12h20.8M3.4 16h19.2" stroke="currentColor" stroke-width="1" opacity=".75"/><path d="M13 23v10" stroke="currentColor" stroke-width="3"/></svg><span>GOODMINTON</span></a>
+    <nav class="nav-links" aria-label="Main">
+      <a href="library.html" class="hide-s">Match library</a>
+      <a href="report.html" class="hide-s">Sample report</a>
+      <a href="library.html" class="signin">Sign in</a>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+  <div class="wrap">
+    <div class="page-head">
+      <div>
+        <h1>Analyze a match</h1>
+        <p class="lede" style="margin-top:14px">One recording, two players. After the upload you go straight to the analysis as it runs, step by step.</p>
+      </div>
+    </div>
+    <ol class="wizard" aria-label="Progress">
+      <li aria-current="step"><span class="label">1 · Upload</span><span>Choose the video and name the players</span></li>
+      <li><span class="label">2 · Processing</span><span>Tracking play and organising rallies</span></li>
+      <li><span class="label">3 · Report</span><span>Review rallies, runs and patterns</span></li>
+    </ol>
+    <div data-upload></div>
+  </div>
+</main>
+
+<footer class="site-foot">
+  <div class="wrap">
+    <p>Prototype: the upload is simulated, and no file leaves your browser.</p>
+    <nav aria-label="Footer"><a href="index.html">Home</a><a href="report.html">Sample report</a><a href="library.html">Match library</a></nav>
+  </div>
+</footer>
+
+<script src="../assets/js/data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/upload.js"></script>
+<script>document.addEventListener('DOMContentLoaded', function () { GM.mountUpload(document.querySelector('[data-upload]'), { id: 'page' }); });</script>
+</body>
+</html>

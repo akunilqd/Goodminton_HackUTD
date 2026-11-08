@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Match library — Goodminton</title>
+<meta name="theme-color" content="#f1ede5">
+<link rel="icon" href="assets/img/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..900&family=Schibsted+Grotesk:ital,wght@0,400..800;1,400..800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/css/goodminton.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to matches</a>
+<header class="site-nav">
+  <div class="wrap">
+    <a class="wordmark" href="index.html" aria-label="Goodminton home">
+      <svg viewBox="0 0 22 30" aria-hidden="true"><rect x="1.5" y="1.5" width="19" height="27" fill="none" stroke="#1d6b49" stroke-width="2"/><path d="M1.5 6.5h19M1.5 23.5h19M11 1.5v8M11 20.5v8M1.5 10.5h19M1.5 19.5h19" stroke="#1d6b49" stroke-width="1.1" fill="none"/><path d="M0 15h22" stroke="#141a24" stroke-width="3"/></svg>
+      <span>Goodminton</span>
+    </a>
+    <nav class="nav-links" aria-label="Main">
+      <a href="library.html" class="hide-s" aria-current="page">Match library</a>
+      <a href="report.html" class="hide-s">Sample report</a>
+      <a href="upload.html" class="btn btn-primary">Analyze a match</a>
+    </nav>
+  </div>
+</header>
+
+<div class="demo-note"><div class="wrap"><span class="tag"><span class="dot"></span>Demo library</span> Illustrative entries. Sign-in isn’t built yet; finished rows open the sample report.</div></div>
+
+<main id="main">
+  <div class="wrap">
+    <div class="page-head">
+      <div><h1>Match library</h1><div class="facts" data-summary></div></div>
+    </div>
+    <div class="lib-tools">
+      <div class="search">
+        <label for="q" class="sr-only">Search players</label>
+        <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M12.6 12.6L17 17" stroke="currentColor" stroke-width="1.6"/></svg>
+        <input id="q" type="search" placeholder="Search by player" autocomplete="off">
+      </div>
+      <div class="filter-group">
+        <span class="label" id="st-l">Status</span>
+        <div class="seg" role="group" aria-labelledby="st-l" data-status>
+          <button type="button" aria-pressed="true" data-v="all">All</button>
+          <button type="button" aria-pressed="false" data-v="ready">Ready</button>
+          <button type="button" aria-pressed="false" data-v="processing">Processing</button>
+          <button type="button" aria-pressed="false" data-v="failed">Failed</button>
+        </div>
+      </div>
+    </div>
+    <table class="lib">
+      <caption class="sr-only">Your analysed matches</caption>
+      <thead>
+        <tr>
+          <th scope="col" aria-sort="descending" data-sort="date"><button type="button">Date</button></th>
+          <th scope="col">Players</th>
+          <th scope="col">Result</th>
+          <th scope="col" data-sort="duration"><button type="button">Duration</button></th>
+          <th scope="col">Analysis</th>
+        </tr>
+      </thead>
+      <tbody data-rows></tbody>
+    </table>
+    <div data-empty hidden class="empty"></div>
+  </div>
+</main>
+
+<footer class="site-foot">
+  <div class="wrap"><p>Goodminton · match library</p><nav aria-label="Footer"><a href="index.html">Home</a><a href="upload.html">Upload</a></nav></div>
+</footer>
+
+<script src="assets/js/data.js"></script>
+<script>
+(function () {
+  var rows = GM_LIBRARY.slice(), M = GM_MATCH;
+  var state = { q: '', status: 'all', sort: 'date', dir: -1 };
+  var tbody = document.querySelector('[data-rows]'), empty = document.querySelector('[data-empty]');
+  function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+  function date(d) { return new Date(d + 'T12:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }); }
+  document.querySelector('[data-summary]').innerHTML = '<span><b>' + rows.length + '</b> matches</span><span><b>' + rows.filter(function (r) { return r.status === 'ready'; }).length + '</b> ready to review</span>';
+
+  function render() {
+    var q = state.q.toLowerCase();
+    var list = rows.filter(function (r) {
+      return (state.status === 'all' || r.status === state.status) && (!q || (r.a + ' ' + r.b).toLowerCase().indexOf(q) !== -1);
+    }).sort(function (x, y) { return (state.sort === 'date' ? (x.date < y.date ? -1 : 1) : x.duration - y.duration) * state.dir; });
+    tbody.innerHTML = list.map(function (r) {
+      var href = r.status === 'ready' ? 'report.html?id=' + r.id : (r.status === 'processing' ? 'processing.html?name=' + encodeURIComponent(r.a.split(' ')[1] + '-' + r.b.split(' ')[1] + '.mp4') + '&a=' + encodeURIComponent(r.a) + '&b=' + encodeURIComponent(r.b) : 'processing.html?fail=1&a=' + encodeURIComponent(r.a) + '&b=' + encodeURIComponent(r.b));
+      var status = r.status === 'ready' ? '<span class="status ready"><i></i>Ready</span>'
+        : r.status === 'processing' ? '<span class="status processing"><i></i>Processing · ' + Math.round(r.progress * 100) + '%</span>'
+        : '<span class="status failed"><i></i>Failed</span><div class="small muted" style="margin-top:2px">' + esc(r.reason) + '</div>';
+      var a = r.winner === 'a' ? '<b>' + esc(r.a) + '</b>' : esc(r.a), b = r.winner === 'b' ? '<b>' + esc(r.b) + '</b>' : esc(r.b);
+      return '<tr data-href="' + href + '">' +
+        '<td class="num c-date">' + date(r.date) + '</td>' +
+        '<td class="players c-players"><a class="rowlink" href="' + href + '">' + a + '<span class="vs">v</span>' + b + '</a></td>' +
+        '<td class="res">' + (r.result || '<span class="muted" style="font-weight:500">—</span>') + '</td>' +
+        '<td class="num c-dur">' + M.util.fmtDuration(r.duration) + '</td>' +
+        '<td>' + status + '</td></tr>';
+    }).join('');
+    if (!list.length) {
+      empty.hidden = false;
+      empty.innerHTML = '<b>No matches found' + (state.q ? ' for “' + esc(state.q) + '”' : '') + '.</b>Check the spelling, or set Status to “All”. <button type="button" class="btn btn-small" style="margin-left:8px" data-reset>Clear filters</button>';
+      empty.querySelector('[data-reset]').onclick = function () { state.q = ''; state.status = 'all'; document.getElementById('q').value = ''; syncSeg(); render(); };
+    } else empty.hidden = true;
+  }
+  tbody.addEventListener('click', function (e) {
+    if (e.target.closest('a')) return;
+    var tr = e.target.closest('tr'); if (tr) location.href = tr.getAttribute('data-href');
+  });
+  document.getElementById('q').addEventListener('input', function (e) { state.q = e.target.value.trim(); render(); });
+  var seg = document.querySelector('[data-status]');
+  function syncSeg() { seg.querySelectorAll('button').forEach(function (b) { b.setAttribute('aria-pressed', String(b.dataset.v === state.status)); }); }
+  seg.addEventListener('click', function (e) { var b = e.target.closest('button'); if (!b) return; state.status = b.dataset.v; syncSeg(); render(); });
+  document.querySelectorAll('th[data-sort] button').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var th = btn.parentNode, key = th.dataset.sort;
+      state.dir = state.sort === key ? -state.dir : -1; state.sort = key;
+      document.querySelectorAll('th[data-sort]').forEach(function (x) { x.removeAttribute('aria-sort'); });
+      th.setAttribute('aria-sort', state.dir < 0 ? 'descending' : 'ascending');
+      render();
+    });
+  });
+  render();
+})();
+</script>
+</body>
+</html>

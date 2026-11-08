@@ -81,9 +81,38 @@ const summary = table(
   }
 );
 
+/**
+ * One row per rally (M7). winnerId 0 and outcome "unknown" mean no landing was
+ * seen, so no point was awarded. landingX/Y are 0 when there was no landing.
+ */
+const rally = table(
+  { name: 'rally', public: true },
+  {
+    id: t.u64().primaryKey().autoInc(),
+    runId: t.string().index('btree'),
+    rallyIndex: t.u32(),
+    game: t.u32(),
+    startFrame: t.u32(),
+    endFrame: t.u32(),
+    startS: t.f32(),
+    endS: t.f32(),
+    shotCount: t.u32(),
+    firstEventId: t.u32(),
+    lastEventId: t.u32(),
+    lastHitterId: t.u32(),
+    winnerId: t.u32(),
+    outcome: t.string(),   // "winner", "net", "out" or "unknown"
+    landingX: t.f32(),
+    landingY: t.f32(),
+    scoreP1: t.u32(),      // Score after this rally.
+    scoreP2: t.u32(),
+    scoreReliable: t.bool(),
+  }
+);
+
 // ── Schema ─────────────────────────────────────────────────────────────────
 
-const spacetimedb = schema({ runMeta, runningDetails, shotClass, summary });
+const spacetimedb = schema({ runMeta, runningDetails, shotClass, summary, rally });
 export default spacetimedb;
 
 // ── Reducers ───────────────────────────────────────────────────────────────
@@ -161,6 +190,29 @@ export const setSummary = spacetimedb.reducer(
   }
 );
 
+export const addRally = spacetimedb.reducer(
+  {
+    runId: t.string(), rallyIndex: t.u32(), game: t.u32(),
+    startFrame: t.u32(), endFrame: t.u32(), startS: t.f32(), endS: t.f32(),
+    shotCount: t.u32(), firstEventId: t.u32(), lastEventId: t.u32(),
+    lastHitterId: t.u32(), winnerId: t.u32(), outcome: t.string(),
+    landingX: t.f32(), landingY: t.f32(),
+    scoreP1: t.u32(), scoreP2: t.u32(), scoreReliable: t.bool(),
+  },
+  (ctx, args) => {
+    ctx.db.rally.insert({ id: 0n, ...args });
+  }
+);
+
+export const clearRallies = spacetimedb.reducer(
+  { runId: t.string() },
+  (ctx, { runId }) => {
+    for (const r of [...ctx.db.rally.runId.filter(runId)]) {
+      ctx.db.rally.id.delete(r.id);
+    }
+  }
+);
+
 export const clearRun = spacetimedb.reducer(
   { runId: t.string() },
   (ctx, { runId }) => {
@@ -169,6 +221,9 @@ export const clearRun = spacetimedb.reducer(
     }
     for (const r of [...ctx.db.shotClass.runId.filter(runId)]) {
       ctx.db.shotClass.id.delete(r.id);
+    }
+    for (const r of [...ctx.db.rally.runId.filter(runId)]) {
+      ctx.db.rally.id.delete(r.id);
     }
     if (ctx.db.summary.runId.find(runId)) ctx.db.summary.runId.delete(runId);
     if (ctx.db.runMeta.runId.find(runId)) ctx.db.runMeta.runId.delete(runId);

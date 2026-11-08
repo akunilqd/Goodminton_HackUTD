@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lindqvist v Okafor · Sample report — Goodminton</title>
+<meta name="description" content="Interactive sample report: rally timeline, court map and timestamped clips from an illustrative badminton match.">
+<meta name="theme-color" content="#f1ede5">
+<link rel="icon" href="assets/img/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..900&family=Schibsted+Grotesk:ital,wght@0,400..800;1,400..800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/css/goodminton.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to report</a>
+
+<header class="site-nav">
+  <div class="wrap">
+    <a class="wordmark" href="index.html" aria-label="Goodminton home">
+      <svg viewBox="0 0 22 30" aria-hidden="true"><rect x="1.5" y="1.5" width="19" height="27" fill="none" stroke="#1d6b49" stroke-width="2"/><path d="M1.5 6.5h19M1.5 23.5h19M11 1.5v8M11 20.5v8M1.5 10.5h19M1.5 19.5h19" stroke="#1d6b49" stroke-width="1.1" fill="none"/><path d="M0 15h22" stroke="#141a24" stroke-width="3"/></svg>
+      <span>Goodminton</span>
+    </a>
+    <nav class="nav-links" aria-label="Main">
+      <a href="library.html" class="hide-s">Match library</a>
+      <a href="report.html" class="hide-s" aria-current="page">Sample report</a>
+      <a href="library.html" class="signin">Sign in</a>
+      <a href="upload.html" class="btn btn-primary">Analyze a match</a>
+    </nav>
+  </div>
+</header>
+
+<div class="demo-note" data-demo-note>
+  <div class="wrap"><span class="tag"><span class="dot"></span>Illustrative</span> This report uses sample data with fictional players. The video is a placeholder driven by the tracked positions.</div>
+</div>
+
+<main id="main" data-report>
+  <div class="wrap">
+    <header class="report-head">
+      <div>
+        <h1>Lindqvist def. Okafor</h1>
+        <div class="facts">
+          <span><b>Singles</b> · club match</span>
+          <span><b>18 Oct 2026</b></span>
+          <span>Duration <b class="num" data-duration></b></span>
+          <span><b class="num" data-rallies></b> rallies</span>
+        </div>
+      </div>
+      <div data-scoreline></div>
+    </header>
+
+    <div class="filters" data-filters aria-label="Filters"></div>
+
+    <div class="bv-video" data-main></div>
+    <div class="bv-row">
+      <aside class="bv-court" data-side aria-label="Court map and heatmap"></aside>
+      <div class="bv-live" data-live aria-label="Live analysis and rally detail"></div>
+    </div>
+    <div class="rp-tl" data-timeline></div>
+  </div>
+
+  <section class="report-section" aria-labelledby="tp-h">
+    <div class="wrap">
+      <h2 id="tp-h">Turning points</h2>
+      <p class="intro">The three runs that decided each game. Each card separates what was <b>measured</b> from what it might <b>suggest</b>; the suggestions are prompts for review, not conclusions.</p>
+      <div data-tps></div>
+    </div>
+  </section>
+
+  <section class="report-section" aria-labelledby="pat-h">
+    <div class="wrap">
+      <h2 id="pat-h">Patterns</h2>
+      <p class="intro">Counts from tracked shots, following the game and player filters above. Estimated shots, where tracking lost the shuttle, are left out of the placement map.</p>
+      <div class="patterns">
+        <div class="panel">
+          <div class="chart-head"><h3>Shot placement</h3></div>
+          <p class="how-read">Where each player’s shots landed in the opponent’s half, as a share of their tracked landings. Darker zones were used more.</p>
+          <div data-placement></div>
+        </div>
+        <div class="panel">
+          <div class="chart-head"><h3>Rally length</h3></div>
+          <p class="how-read">Points won, grouped by how many shots the rally lasted.</p>
+          <div data-lengths></div>
+        </div>
+        <div class="panel">
+          <div class="chart-head"><h3>Winners &amp; errors</h3></div>
+          <p class="how-read">A winner lands in court untouched; an error goes into the net or out. Errors aren’t split into forced and unforced, because that is a judgement, not a measurement.</p>
+          <div data-ledger></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="report-section" aria-labelledby="rev-h">
+    <div class="wrap">
+      <h2 id="rev-h">What to review</h2>
+      <p class="intro">Timestamped moments to rewatch. Each button jumps the video to that rally.</p>
+      <div class="review">
+        <div>
+          <div class="chart-head"><h3>Suggested clips</h3><span class="small muted">From the measured data</span></div>
+          <ul class="clips" data-suggested></ul>
+        </div>
+        <div>
+          <div class="chart-head"><h3>Your review list</h3><span class="small muted">Saved in this browser</span></div>
+          <ul class="clips" data-mine></ul>
+        </div>
+      </div>
+    </div>
+  </section>
+  <section class="report-section" aria-labelledby="pl-h" style="padding-bottom:24px">
+    <div class="wrap">
+      <h2 id="pl-h">The players</h2>
+      <p class="intro">Both players across the whole match. Counts are <b>measured</b>; speeds and distances are <b>estimated</b> from 2D tracking on one camera.</p>
+      <div data-players></div>
+    </div>
+  </section>
+</main>
+
+<footer class="site-foot">
+  <div class="wrap">
+    <p>Sample report · illustrative data, fictional players, placeholder footage. Shot types are labelled from flight and landing position; check them against the video.</p>
+    <nav aria-label="Footer">
+      <a href="index.html">Home</a>
+      <a href="library.html">Match library</a>
+      <a href="upload.html">Upload</a>
+    </nav>
+  </div>
+</footer>
+
+<script src="assets/js/data.js"></script>
+<script src="assets/js/app.js"></script>
+<script src="assets/js/board.js"></script>
+<script>
+  document.addEventListener('DOMContentLoaded', function () {
+    var M = GM_MATCH, root = document.querySelector('[data-report]');
+    document.querySelector('[data-duration]').textContent = M.util.fmtDuration(M.duration);
+    document.querySelector('[data-rallies]').textContent = M.rallies.length;
+    var params = new URLSearchParams(location.search);
+    if (params.get('from') === 'processing' || (params.get('id') && params.get('id') !== 'sample')) {
+      document.querySelector('[data-demo-note] .wrap').insertAdjacentHTML('beforeend', ' <b>Prototype:</b> every analysis currently opens this sample.');
+    }
+    // score line
+    var sl = document.querySelector('[data-scoreline]');
+    var box = document.createElement('div');
+    box.className = 'scoreline';
+    ['A', 'B'].forEach(function (id, i) {
+      if (i) box.insertAdjacentHTML('beforeend', '<div class="div"></div>');
+      box.insertAdjacentHTML('beforeend', '<div class="who">' + M.players[id].name + (M.winner === id ? ' <span class="win-mark" aria-label="(winner)"></span>' : '') + '</div>' +
+        M.games.map(function (g) { return '<div class="g ' + (g.winner === id ? 'won' : 'lost') + '">' + g.score[id] + '</div>'; }).join(''));
+    });
+    sl.appendChild(box);
+    GM.mountReport(root);
+  });
+</script>
+</body>
+</html>

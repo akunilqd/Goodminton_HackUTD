@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Analysing your match — Goodminton</title>
+<meta name="theme-color" content="#f1ede5">
+<link rel="icon" href="assets/img/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..900&family=Schibsted+Grotesk:ital,wght@0,400..800;1,400..800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/css/goodminton.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to status</a>
+<header class="site-nav">
+  <div class="wrap">
+    <a class="wordmark" href="index.html" aria-label="Goodminton home">
+      <svg viewBox="0 0 22 30" aria-hidden="true"><rect x="1.5" y="1.5" width="19" height="27" fill="none" style="stroke:var(--green)" stroke-width="2"/><path d="M1.5 6.5h19M1.5 23.5h19M11 1.5v8M11 20.5v8M1.5 10.5h19M1.5 19.5h19" style="stroke:var(--green)" stroke-width="1.1" fill="none"/><path d="M0 15h22" stroke="#141a24" stroke-width="3"/></svg>
+      <span>Goodminton</span>
+    </a>
+    <nav class="nav-links" aria-label="Main">
+      <a href="library.html" class="hide-s">Match library</a>
+      <a href="report.html" class="hide-s">Sample report</a>
+      <a href="upload.html" class="btn">New upload</a>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+  <div class="wrap">
+    <div class="page-head">
+      <div>
+        <h1 data-title>Analysing your match</h1>
+        <div class="facts" data-facts></div>
+      </div>
+    </div>
+    <ol class="wizard" aria-label="Progress">
+      <li class="done"><span class="label">1 · Upload</span><span>Received</span></li>
+      <li aria-current="step" data-wiz2><span class="label">2 · Processing</span><span>Tracking play and organising rallies</span></li>
+      <li data-wiz3><span class="label">3 · Report</span><span>Review rallies, runs and patterns</span></li>
+    </ol>
+
+    <div class="proc">
+      <div>
+        <ol class="proc-steps" data-steps aria-label="Processing steps"></ol>
+        <p class="small muted" style="margin-top:14px">Processing time hasn’t been measured for this version yet, so there’s no estimate. Each step reports when it starts and finishes. You can leave this page; the match keeps processing and appears in your library.</p>
+      </div>
+      <div class="proc-live">
+        <div class="panel">
+          <div class="chart-head"><h2 class="h-panel">Rallies found so far</h2><span class="small muted num" data-elapsed>0:00 elapsed</span></div>
+          <div class="found"><span class="found-big num" data-count>0</span></div>
+          <div class="found-strip" data-strip aria-hidden="true"></div>
+          <p class="how-read" data-strip-note>Rallies appear here as play is split. Bar height is shots per rally; solid bars are points to the near-side player, hatched to the far side.</p>
+        </div>
+        <div data-outcome aria-live="polite"></div>
+        <div class="hero-actions" data-actions>
+          <a class="btn" href="library.html">Go to library, keep processing</a>
+          <button class="btn btn-quiet" type="button" data-cancel>Cancel analysis</button>
+        </div>
+        <div data-confirm hidden class="notice">
+          <h2>Cancel this analysis?</h2>
+          <p>Processing stops and the uploaded video is deleted. You’d need to upload it again.</p>
+          <div class="hero-actions"><button class="btn" type="button" data-confirm-yes>Yes, cancel and delete</button><button class="btn btn-quiet" type="button" data-confirm-no>Keep processing</button></div>
+        </div>
+        <p class="small muted">Prototype: these steps are simulated, and the finished analysis opens the sample report. Add <code>?fail=1</code> to the address to see the failure state.</p>
+      </div>
+    </div>
+  </div>
+</main>
+
+<footer class="site-foot">
+  <div class="wrap">
+    <p>Goodminton · analysis in progress</p>
+    <nav aria-label="Footer"><a href="index.html">Home</a><a href="library.html">Match library</a></nav>
+  </div>
+</footer>
+
+<script src="assets/js/data.js"></script>
+<script src="assets/js/app.js"></script>
+<script>
+(function () {
+  var M = GM_MATCH, q = new URLSearchParams(location.search);
+  var file = q.get('name') || 'match-recording.mp4';
+  var size = +q.get('size') || 2.1e9;
+  var a = q.get('a') || 'Near-side player', b = q.get('b') || 'Far-side player';
+  var len = +q.get('len') || null;
+  var fail = q.get('fail');
+
+  document.querySelector('[data-title]').textContent = a + ' v ' + b;
+  document.title = 'Analysing ' + a + ' v ' + b + ' — Goodminton';
+  var gb = size >= 1e9 ? (size / 1e9).toFixed(2).replace(/\.?0+$/, '') + ' GB' : Math.round(size / 1e6) + ' MB';
+  document.querySelector('[data-facts]').innerHTML = '<span><b>' + file.replace(/</g, '&lt;') + '</b></span><span class="num">' + gb + (len ? ' · ' + M.util.fmtTime(len) : '') + '</span><span>Singles</span>';
+
+  var STEPS = [
+    { t: 'Upload received', d: 'File stored and checked for completeness.', s: 1.2 },
+    { t: 'Checking the recording', d: 'Resolution, frame rate, and whether all four court corners are in view.', s: 2.6 },
+    { t: 'Finding the court lines', d: 'The lines set the scale, so positions can be measured in metres.', s: 3.2, failHere: true },
+    { t: 'Tracking players and shuttle', d: 'Usually the longest step. Fast exchanges can lose the shuttle; those shots will be marked as estimated.', s: 13, rallies: [0, 0.72] },
+    { t: 'Splitting rallies and rebuilding the score', d: 'Rallies are found from breaks in play. Check the rebuilt score against your scoresheet.', s: 6, rallies: [0.72, 1] },
+    { t: 'Building the report', d: 'Timeline, court map, patterns and suggested clips.', s: 2.4 }
+  ];
+  var ICONS = {
+    todo: '<svg class="ico" viewBox="0 0 22 22"><rect x="3" y="3" width="16" height="16" fill="none" style="stroke:var(--rule-strong)" stroke-width="1.5"/></svg>',
+    active: '<svg class="ico spin" viewBox="0 0 22 22"><circle cx="11" cy="11" r="8" fill="none" style="stroke:var(--rule)" stroke-width="2"/><path d="M11 3a8 8 0 0 1 8 8" fill="none" style="stroke:var(--green)" stroke-width="2.4"/></svg>',
+    done: '<svg class="ico" viewBox="0 0 22 22"><rect x="3" y="3" width="16" height="16" style="fill:var(--green)"/><path d="M7 11.2l2.8 2.8L15.2 8" fill="none" style="stroke:var(--on-accent)" stroke-width="2"/></svg>',
+    error: '<svg class="ico" viewBox="0 0 22 22"><rect x="3" y="3" width="16" height="16" style="fill:var(--alert)"/><path d="M11 6.5v5.5M11 14.2v1.4" style="stroke:var(--on-accent)" stroke-width="2"/></svg>'
+  };
+  var list = document.querySelector('[data-steps]');
+  var rows = STEPS.map(function (st) {
+    var li = document.createElement('li');
+    li.dataset.state = 'todo';
+    li.innerHTML = '<span class="i">' + ICONS.todo + '</span><div><div class="t">' + st.t + '</div><div class="d">' + st.d + '</div></div><span class="s num">Waiting</span>';
+    list.appendChild(li);
+    return li;
+  });
+  function setRow(i, state, text) {
+    var li = rows[i];
+    li.dataset.state = state;
+    li.querySelector('.i').innerHTML = ICONS[state];
+    li.querySelector('.s').textContent = text;
+    if (state === 'active') li.setAttribute('aria-current', 'step'); else li.removeAttribute('aria-current');
+  }
+
+  var strip = document.querySelector('[data-strip]'), count = document.querySelector('[data-count]'), elapsedEl = document.querySelector('[data-elapsed]');
+  var shown = 0, total = M.rallies.length;
+  function showRallies(n) {
+    while (shown < n && shown < total) {
+      var r = M.rallies[shown];
+      var i = document.createElement('i');
+      i.style.height = Math.max(4, Math.min(62, r.length * 2)) + 'px';
+      if (r.winner === 'B') i.className = 'b';
+      strip.appendChild(i);
+      shown++;
+    }
+    count.textContent = shown;
+  }
+
+  var t0 = performance.now(), idx = 0, stepStart = t0, stopped = false;
+  var outcome = document.querySelector('[data-outcome]');
+  function fmtS(ms) { return (ms / 1000).toFixed(1) + ' s'; }
+  setRow(0, 'active', 'Running');
+  function frame(now) {
+    if (stopped) return;
+    var el = now - t0;
+    elapsedEl.textContent = M.util.fmtTime(el / 1000) + ' elapsed';
+    var st = STEPS[idx], p = Math.min(1, (now - stepStart) / (st.s * 1000));
+    if (st.rallies) showRallies(Math.round(total * (st.rallies[0] + (st.rallies[1] - st.rallies[0]) * p)));
+    if (fail && st.failHere && p > 0.7) return failNow();
+    if (p >= 1) {
+      setRow(idx, 'done', 'Done · ' + fmtS(now - stepStart));
+      idx++; stepStart = now;
+      if (idx >= STEPS.length) return finish();
+      setRow(idx, 'active', 'Running');
+    }
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+
+  function finish() {
+    stopped = true;
+    showRallies(total);
+    document.querySelector('[data-wiz2]').removeAttribute('aria-current');
+    document.querySelector('[data-wiz2]').classList.add('done');
+    document.querySelector('[data-wiz3]').setAttribute('aria-current', 'step');
+    var partial = M.rallies.filter(function (r) { return r.tracking === 'partial'; }).length;
+    outcome.innerHTML = '<div class="notice notice-ok"><h2>Analysis ready</h2><p>' + total + ' rallies across ' + M.games.length + ' games. ' + partial + ' rallies have estimated shots where tracking lost the shuttle; they’re marked in the report.</p><div><a class="btn btn-primary" href="report.html?from=processing">Open the report <span class="arrow-ic" aria-hidden="true"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3.5 10h12.6M11 5.2l5 4.8-5 4.8" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="square" stroke-linejoin="round"/></svg></span></a></div></div>';
+    document.querySelector('[data-actions]').hidden = true;
+    outcome.querySelector('a').focus();
+  }
+  function failNow() {
+    stopped = true;
+    setRow(idx, 'error', 'Stopped');
+    for (var k = idx + 1; k < rows.length; k++) setRow(k, 'todo', 'Not run');
+    outcome.innerHTML = '<div class="notice"><h2>We couldn’t find all four court corners</h2><p>The camera seems too low or too close, so the near corners are out of frame. Without them, positions can’t be measured. Nothing else was analysed.</p><ul class="small" style="margin:0;padding-left:1.1em"><li>Re-record from higher up, behind a baseline, with the whole court in view.</li><li>Or upload a different recording of the same match.</li></ul><div class="hero-actions"><a class="btn btn-primary" href="upload.html">Upload another recording</a><a class="btn" href="library.html">Back to library</a></div></div>';
+    document.querySelector('[data-actions]').hidden = true;
+    outcome.querySelector('h2').setAttribute('tabindex', '-1'); outcome.querySelector('h2').focus();
+  }
+
+  var confirmBox = document.querySelector('[data-confirm]');
+  document.querySelector('[data-cancel]').addEventListener('click', function () { confirmBox.hidden = false; confirmBox.querySelector('[data-confirm-no]').focus(); });
+  document.querySelector('[data-confirm-no]').addEventListener('click', function () { confirmBox.hidden = true; document.querySelector('[data-cancel]').focus(); });
+  document.querySelector('[data-confirm-yes]').addEventListener('click', function () {
+    stopped = true;
+    confirmBox.hidden = true;
+    rows.forEach(function (li, i) { if (li.dataset.state !== 'done') setRow(i, 'todo', 'Cancelled'); });
+    document.querySelector('[data-actions]').hidden = true;
+    outcome.innerHTML = '<div class="notice notice-ok" style="border-top-color:var(--ink);background:var(--paper-2)"><h2 style="color:var(--ink)">Analysis cancelled</h2><p>Processing stopped and the video was deleted.</p><div><a class="btn btn-primary" href="upload.html">Upload a match</a></div></div>';
+    outcome.querySelector('a').focus();
+  });
+})();
+</script>
+</body>
+</html>
