@@ -90,9 +90,10 @@
         var tbody = h('tbody');
         runs.forEach(function (r) {
           var href = runHref(r.id);
+          var matchLabel = (r.nearName && r.farName) ? (r.nearName + ' vs ' + r.farName) : (r.nearName || r.farName || r.id);
           var tr = h('tr', null, [
             h('td', { class: 'num c-date' }, [dateText(r.createdAt)]),
-            h('td', { class: 'players c-players' }, [h('a', { class: 'rowlink', href: href }, [r.id])]),
+            h('td', { class: 'players c-players' }, [h('a', { class: 'rowlink', href: href }, [matchLabel])]),
             h('td', null, [r.videoName || '—']),
             h('td', { class: 'num c-dur' }, [lengthText(r.durationS)]),
             h('td', null, [h('span', { class: 'status ' + (r.complete ? 'ready' : 'processing') }, [h('i'), r.complete ? 'Ready' : 'Incomplete'])])
@@ -120,11 +121,72 @@
     [1, 2].forEach(function (id) { if (!seen[id]) seen[id] = { id: id, top: 0, bottom: 0, shots: [] }; });
     return Object.keys(seen).map(function (k) {
       var p = seen[k];
-      p.end = p.bottom > p.top ? 'near' : (p.top > p.bottom ? 'far' : null);
-      p.name = p.end ? NAMES[p.end] : 'Player ' + p.id;
+      p.end = p.id === 2 ? 'near' : p.id === 1 ? 'far' : null;
+      p.name = p.end === 'near' ? (run.nearName || NAMES.near) : p.end === 'far' ? (run.farName || NAMES.far) : 'Player ' + p.id;
       return p;
     }).sort(function (a, b) { return (a.end === 'near' ? 0 : 1) - (b.end === 'near' ? 0 : 1) || a.id - b.id; });
   }
+  var RUN_FS_ENTER = '<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/></svg>';
+  var RUN_FS_EXIT = '<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M5 16h3v3h2v-5H5v2zm3-8H5v2h5V5H8v3zm6 11h2v-3h3v-2h-5v5zm2-11V5h-2v5h5V8h-3z"/></svg>';
+  var EASE_FS = 'cubic-bezier(0.23, 1, 0.32, 1)';
+
+  function makeRunPlayer(videoUrl, run) {
+    var outer = h('div', { class: 'run-player has-live-panel' });
+    var stage = h('div', {class: 'run-video-stage'});
+    var vid = h('video', { class: 'run-video', src: videoUrl, controls: true, controlslist: 'nofullscreen', preload: 'metadata', playsinline: true });
+    var fsBtn = h('button', { class: 'run-fs-btn', type: 'button', 'aria-label': 'Full screen with live analysis' });
+    fsBtn.innerHTML = RUN_FS_ENTER;
+    stage.appendChild(vid); stage.appendChild(fsBtn); outer.appendChild(stage);
+    var side = h('aside', {class: 'run-live-panel'}); outer.appendChild(side);
+    var panel = GM.TrackedLivePanel(side, run);
+    outer.livePanel = panel;
+    var raf = null;
+    function sync() { panel.render(vid.currentTime, !vid.paused && !vid.ended); }
+    function tick() { sync(); if (!vid.paused && !vid.ended) raf = requestAnimationFrame(tick); }
+    ['timeupdate', 'seeking', 'seeked', 'loadedmetadata', 'pause', 'ended'].forEach(function (ev) { vid.addEventListener(ev, sync); });
+    vid.addEventListener('play', function () { cancelAnimationFrame(raf); tick(); });
+    vid.addEventListener('error', function () { panel.setStatus('Video unavailable. Reload to try again.'); });
+    window.addEventListener('pagehide', function () { cancelAnimationFrame(raf); }, {once: true});
+    fsBtn.addEventListener('click', function () {
+      var holder = h('div', {class: 'run-fs-holder'}), previous = document.activeElement;
+      holder.style.height = outer.offsetHeight + 'px'; outer.replaceWith(holder);
+      var shell = h('div', {class: 'run-fs-shell', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Full-screen footage and live analysis'});
+      var exit = h('button', {class: 'run-fs-exit', type: 'button', 'aria-label': 'Exit full screen'});
+      exit.innerHTML = RUN_FS_EXIT; shell.appendChild(outer); shell.appendChild(exit); document.body.appendChild(shell);
+      document.documentElement.classList.add('fs-lock');
+      fsBtn.hidden = true; exit.focus();
+      var closed = false, entered = false;
+      function close() {
+        if (closed) return; closed = true;
+        holder.replaceWith(outer); shell.remove(); fsBtn.hidden = false;
+        document.documentElement.classList.remove('fs-lock');
+        document.removeEventListener('fullscreenchange', changed); document.removeEventListener('webkitfullscreenchange', changed);
+        document.removeEventListener('keydown', keys);
+        if (previous) previous.focus({preventScroll: true});
+      }
+      function leave() {
+        var exitFs = document.exitFullscreen || document.webkitExitFullscreen;
+        if ((document.fullscreenElement || document.webkitFullscreenElement) === shell && exitFs) {
+          Promise.resolve(exitFs.call(document)).then(close, close);
+        } else close();
+      }
+      function changed() {
+        if ((document.fullscreenElement || document.webkitFullscreenElement) === shell) entered = true;
+        else if (entered) close();
+      }
+      function keys(e) {
+        if (e.key === 'Escape') { e.preventDefault(); leave(); }
+        if (e.key === 'Tab') { e.preventDefault(); (document.activeElement === exit ? vid : exit).focus(); }
+      }
+      exit.addEventListener('click', leave);
+      document.addEventListener('fullscreenchange', changed); document.addEventListener('webkitfullscreenchange', changed);
+      document.addEventListener('keydown', keys);
+      var request = shell.requestFullscreen || shell.webkitRequestFullscreen;
+      if (request) { try { Promise.resolve(request.call(shell)).catch(function () {}); } catch (e) {} }
+    });
+    return outer;
+  }
+
   function fact(label, value) { return h('span', null, [label ? label + ' ' : '', h('b', { class: 'num' }, [value])]); }
   function metric(label, value, note) {
     var dd = h('dd', { class: 'num' }, [value]);
@@ -143,8 +205,8 @@
     var rows = Object.keys(mix).sort(function (a, b) { return mix[b] - mix[a]; });
     var dist = run.summary ? run.summary.distanceM[p.id] : null;
     var head = h('header', { class: 'pc-head' }, [
-      h('span', { class: 'pc-plate', 'aria-hidden': 'true' }, ['P' + p.id]),
-      h('div', null, [h('h3', null, [p.name]), h('p', { class: 'small' }, ['Tracked as player ' + p.id + (p.end ? ', ' + p.end + ' end on camera' : '')])])
+      h('span', { class: 'pc-plate', 'aria-hidden': 'true' }, [p.end === 'near' ? 'Near' : 'Far']),
+      h('div', null, [h('h3', null, [p.name]), h('p', { class: 'small' }, [(p.end || '') + ' end on camera'])])
     ]);
     var mixBox = h('div', { class: 'pc-mix' }, [h('div', { class: 'pc-mix-k' }, ['Shot mix'])]);
     if (!rows.length) mixBox.appendChild(h('p', { class: 'small muted' }, ['No hits attributed to this player.']));
@@ -223,7 +285,7 @@
   }
 
   // Speeds need the per-frame table, which can be large: it loads on its own and can fail on its own.
-  function frameMetrics(run, players, slots, status) {
+  function frameMetrics(run, players, slots, status, panel) {
     Loader(status, {
       fetch: function (signal) {
         return api.getFrames(run, { signal: signal, onProgress: function (done, all) {
@@ -232,8 +294,9 @@
         } });
       },
       skeleton: function () { return h('p', { class: 'small muted', role: 'status', 'data-frames-progress': '' }, ['Loading tracking data…']); },
-      error: function () { return { title: 'Tracking data didn’t load' }; },
+      error: function () { if (panel) panel.setStatus('Tracking unavailable. Use Try again below.'); return { title: 'Tracking data didn’t load' }; },
       render: function (frames) {
+        if (panel) panel.setFrames(frames);
         players.forEach(function (p) {
           var key = p.id === 1 ? 'p1Speed' : 'p2Speed';
           var speeds = frames.map(function (f) { return f[key]; }).filter(function (v) { return v && v <= 12; }); // above 12 m/s is a tracking jump, not footwork
@@ -253,32 +316,47 @@
     var link = { href: 'library.html', label: 'Back to library' };
     return Loader(root, {
       fetch: function (signal) {
-        return Promise.all([api.getRun(id, { signal: signal }), GM.pipeline.jobIfAny(id)]).then(function (res) { res[0].job = res[1]; return res[0]; });
+        return Promise.all([api.getRun(id, { signal: signal }), GM.pipeline.jobIfAny(id)]).then(async function (res) {
+          var run = res[0]; run.job = res[1]; run.analyzedVideoUrl = res[1] && res[1].analyzed_video_url || null;
+          if (!run.analyzedVideoUrl) {
+            try {
+              run.analyzedVideoUrl = await api.getAnalyzedVideo(id, {signal: signal});
+              if (run.analyzedVideoUrl) window.addEventListener('pagehide', function () { URL.revokeObjectURL(run.analyzedVideoUrl); }, {once: true});
+            } catch (e) { if (e.code === 'aborted') throw e; run.videoError = true; }
+          }
+          return run;
+        });
       },
       skeleton: function () { return h('div', { class: 'wrap run-loading' }, [skeleton(5, 'Loading run')]); },
       error: function () { return { link: link }; },
       render: function (run) {
-        document.title = run.id + ' — Goodminton';
+        var near = (run.job && run.job.near) || run.nearName || '';
+        var far = (run.job && run.job.far) || run.farName || '';
+        var matchTitle = (near && far) ? (near + ' vs ' + far) : (near || far || run.id);
+        document.title = matchTitle + ' — Goodminton';
+        run.nearName = near; run.farName = far;
         var players = playersOf(run), wrap = h('div', { class: 'wrap' });
         var facts = h('div', { class: 'facts' }, [fact('', dateText(run.createdAt)), fact('Length', lengthText(run.durationS)), fact('', run.totalFrames.toLocaleString() + ' frames'), fact('', run.shots.length + ' hits')]);
         if (run.summary && run.summary.avgShuttleSpeedMs != null) facts.appendChild(fact('Avg shuttle at hit (est.)', Math.round(run.summary.avgShuttleSpeedMs * 3.6) + ' km/h'));
-        wrap.appendChild(h('header', { class: 'report-head' }, [h('div', null, [h('h1', null, [run.id]), facts])]));
+        wrap.appendChild(h('header', { class: 'report-head' }, [h('div', null, [h('h1', null, [matchTitle]), facts])]));
         var decided = (run.rallies || []).filter(function (r) { return r.winnerId; }).length;
         if (run.rallies) facts.appendChild(fact('', run.rallies.length + (run.rallies.length === 1 ? ' rally' : ' rallies') + (run.rallies.length ? ', ' + decided + ' with a clear result' : '')));
-        var videoUrl = run.job && run.job.video_url;
-        var note = 'Source: ' + (run.job && run.job.filename || run.videoName || 'unknown') + '. ' + (videoUrl ? '' : 'The original video isn’t available for this run. ') +
+        var videoUrl = run.analyzedVideoUrl;
+        var note = 'Source: ' + (run.job && run.job.filename || run.videoName || 'unknown') + '. ' + (videoUrl ? '' : 'The analysed video isn’t available for this run. ') +
           (run.rallies ? 'Results are estimated from where the shuttle was seen landing; a rally with no clear landing has no result.' : 'Rally results haven’t been published for this run.');
         wrap.appendChild(h('p', { class: 'how-read run-note' }, [note]));
         if (decided) wrap.appendChild(h('p', { class: 'run-open' }, [h('a', { class: 'btn btn-primary', href: 'report.html?run=' + encodeURIComponent(run.id) }, ['Open the full report'])]));
         if (!run.complete) wrap.appendChild(h('div', { class: 'notice', role: 'status' }, [h('h3', null, ['Analysis incomplete']), h('p', null, ['This run’s summary hasn’t been published, so some figures are missing.'])]));
-        if (videoUrl) wrap.appendChild(h('video', { class: 'run-video', src: videoUrl, controls: true, preload: 'metadata', playsinline: true }));
+        var player = videoUrl ? makeRunPlayer(videoUrl, run) : null;
+        if (player) wrap.appendChild(player);
         var slots = {}, status = h('div', { class: 'run-frames-status', 'aria-live': 'polite' }), cards = h('div', { class: 'players' });
         players.forEach(function (p) { slots[p.id] = h('div', { class: 'run-slot' }); cards.appendChild(playerCard(run, p, slots[p.id])); });
         wrap.appendChild(h('div', { class: 'run-grid' }, [courtHeat(run), h('div', { class: 'run-main' }, [cards, status])]));
         if (run.rallies) wrap.appendChild(rallyTable(run, players));
         wrap.appendChild(shotTable(run, players));
         root.appendChild(wrap);
-        if (run.totalFrames > 0) frameMetrics(run, players, slots, status);
+        if (run.totalFrames > 0) frameMetrics(run, players, slots, status, player && player.livePanel);
+        else if (player) player.livePanel.setFrames([]);
       }
     });
   };

@@ -24,6 +24,7 @@ import sys
 import threading
 import time
 import uuid
+import unicodedata
 from contextlib import asynccontextmanager
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -41,7 +42,7 @@ OUTPUTS_DIR = ROOT / "outputs"
 
 MAX_BYTES = 4 * 10**9
 VIDEO_TYPES = {".mp4": "video/mp4", ".mov": "video/quicktime"}
-JOB_ID = re.compile(r"^job_[0-9]{10}_[0-9a-f]{8}$")
+JOB_ID = re.compile(r"^[^\W_][\w]{1,78}[^\W_]$", re.UNICODE)
 ACTIVE = {"queued", "running"}
 
 # A line from the pipeline's log moves the job to the stage named here.
@@ -60,8 +61,13 @@ _queue: "queue.Queue[str]" = queue.Queue()
 _process: tuple[str, subprocess.Popen] | None = None
 
 
-def pipeline_command(video: Path, output: Path) -> list[str]:
-    return [sys.executable, "-u", str(ROOT / "main.py"), "run", str(video), "--output", str(output), "--stdb"]
+def pipeline_command(video: Path, output: Path, near: str = "", far: str = "") -> list[str]:
+    cmd = [sys.executable, "-u", str(ROOT / "main.py"), "run", str(video), "--output", str(output), "--stdb"]
+    if near:
+        cmd += ["--near", near]
+    if far:
+        cmd += ["--far", far]
+    return cmd
 
 
 def _job_dir(job_id: str) -> Path:
@@ -86,19 +92,32 @@ def _video_path(job: dict) -> Path:
     return _job_dir(job["id"]) / f"video{job['extension']}"
 
 
+def _analyzed_path(job_id: str) -> Path | None:
+    folder = OUTPUTS_DIR / job_id
+    return next((folder / name for name in ("shuttle.mp4", "annotated.mp4", "shots.mp4")
+                 if (folder / name).is_file()), None)
+
+
 def _public(job: dict) -> dict:
     has_video = _video_path(job).is_file()
+    has_analyzed = job.get("status") == "complete" and _analyzed_path(job["id"]) is not None
     fields = ("id", "status", "stage", "filename", "near", "far", "error", "warnings", "rallies", "created_at", "finished_at")
-    return {**{k: job.get(k) for k in fields}, "video_url": f"/api/videos/{job['id']}" if has_video else None}
+    return {
+        **{k: job.get(k) for k in fields},
+        "video_url": f"/api/videos/{job['id']}" if has_video else None,
+        "analyzed_video_url": f"/api/analyzed-videos/{job['id']}" if has_analyzed else None,
+    }
 
 
 def _load_jobs() -> None:
     """Restore finished jobs. Anything mid-flight died with the previous server."""
     JOBS_DIR.mkdir(exist_ok=True)
-    for path in JOBS_DIR.glob("job_*/job.json"):
+    for path in JOBS_DIR.glob("*/job.json"):
         try:
             job = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
+            continue
+        if not isinstance(job, dict) or not JOB_ID.fullmatch(str(job.get("id", ""))) or job["id"] != path.parent.name:
             continue
         if job.get("status") in ACTIVE:
             job.update(status="failed", error="The server restarted during this analysis. Please upload the video again.")
@@ -118,7 +137,7 @@ def _run_job(job_id: str) -> None:
     last_error, warnings = None, []
     with (_job_dir(job_id) / "pipeline.log").open("w", encoding="utf-8") as log:
         process = subprocess.Popen(
-            pipeline_command(_video_path(job), output), cwd=ROOT, env=environment,
+            pipeline_command(_video_path(job), output, near=job.get("near",""), far=job.get("far","")), cwd=ROOT, env=environment,
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace",
         )
         with _lock:
@@ -186,11 +205,24 @@ def same_site(request: Request) -> None:
 
 
 def _clean_name(value: str) -> str:
-    return re.sub(r"[\x00-\x1f\x7f<>&\"']", "", value).strip()[:60]
+    return re.sub(r"[\x00-\x1f\x7f<>&\"']", "", unicodedata.normalize("NFC", value)).strip()[:60]
+
+
+def _make_job_id(near: str, far: str) -> str:
+    def slug(name: str) -> str:
+        return "".join(c for c in name if c.isalnum())[:20]
+    ts = int(time.time())
+    h = uuid.uuid4().hex[:6]
+    a, b = slug(near), slug(far)
+    if a and b:
+        return f"{a}_vs_{b}_{ts}_{h}"
+    if a or b:
+        return f"{a or b}_{ts}_{h}"
+    return f"match_{ts}_{h}"
 
 
 def _get_job(job_id: str) -> dict:
-    job = _jobs.get(job_id) if JOB_ID.match(job_id) else None
+    job = _jobs.get(job_id) if JOB_ID.fullmatch(job_id) else None
     if job is None:
         raise HTTPException(404, "No such analysis.")
     return job
@@ -203,6 +235,9 @@ def health():
 
 @app.post("/api/jobs", status_code=201, dependencies=[Depends(same_site)])
 async def create_job(request: Request, filename: str, near: str = "", far: str = ""):
+    near, far = _clean_name(near), _clean_name(far)
+    if not any(c.isalnum() for c in near) or not any(c.isalnum() for c in far):
+        raise HTTPException(422, "Enter both the near and far player's names.")
     extension = Path(filename).suffix.lower()
     if extension not in VIDEO_TYPES:
         raise HTTPException(415, "Choose an MP4 or MOV file.")
@@ -210,7 +245,7 @@ async def create_job(request: Request, filename: str, near: str = "", far: str =
     if declared and declared.isdigit() and int(declared) > MAX_BYTES:
         raise HTTPException(413, "This file is larger than the 4 GB limit.")
 
-    job_id = f"job_{int(time.time())}_{uuid.uuid4().hex[:8]}"
+    job_id = _make_job_id(near, far)
     folder = _job_dir(job_id)
     folder.mkdir(parents=True)
     partial = folder / "upload.partial"
@@ -275,6 +310,19 @@ def get_video(job_id: str):
     if not path.is_file():
         raise HTTPException(404, "This video is no longer stored.")
     return FileResponse(path, media_type=VIDEO_TYPES[job["extension"]])  # Handles Range, so seeking works.
+
+
+@app.get("/api/analyzed-videos/{job_id}")
+def get_analyzed_video(job_id: str):
+    if not JOB_ID.fullmatch(job_id):
+        raise HTTPException(400, "Invalid job id.")
+    job = _jobs.get(job_id)
+    if job and job.get("status") in ACTIVE:
+        raise HTTPException(409, "The annotated video is still being written.")
+    path = _analyzed_path(job_id)
+    if path is None:
+        raise HTTPException(404, "Analysed video not found.")
+    return FileResponse(path, media_type="video/mp4")
 
 
 @app.get("/")

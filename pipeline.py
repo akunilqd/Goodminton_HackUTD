@@ -5,15 +5,18 @@ import csv
 import json
 import logging
 import math
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, replace
+from itertools import islice
 from pathlib import Path
+from functools import lru_cache
 
 import cv2
 import numpy as np
 
 from module3_court.geometry import draw_mini_court, fit_detector_homography, on_court, project_point
 from schemas import Court, FrameResult
-from video import VideoReader
+from video import BackgroundWriter, VideoReader, read_ahead
 
 LOGGER = logging.getLogger(__name__)
 
@@ -28,7 +31,23 @@ _POSE_EDGES = (
 )
 
 
-def render_frame(frame, result, trail, pose_threshold=0.3, court_threshold=0.5):
+@lru_cache(maxsize=128)
+def _name_sprite(text, color):
+    """Cache Unicode labels so drawing names adds no per-frame font loading."""
+    from PIL import Image, ImageDraw, ImageFont
+    import os
+    font_path = Path(os.environ.get("WINDIR", "C:/Windows")) / "Fonts" / "segoeui.ttf"
+    font = ImageFont.truetype(str(font_path) if font_path.exists() else "DejaVuSans.ttf", 17)
+    bounds = font.getbbox(text)
+    image = Image.new("RGBA", (bounds[2] - bounds[0] + 6, bounds[3] - bounds[1] + 6))
+    ImageDraw.Draw(image).text((3 - bounds[0], 3 - bounds[1]), text, font=font,
+                              fill=(*color[::-1], 255), stroke_width=1, stroke_fill=(0, 0, 0, 255))
+    rgba = np.asarray(image)
+    return rgba[:, :, :3][:, :, ::-1], rgba[:, :, 3:4] / 255.0
+
+
+def render_frame(frame, result, trail, pose_threshold=0.3, court_threshold=0.5,
+                 names=None, player_trails=None):
     """Draw inference results only after all models have seen the original frame."""
     height, width = frame.shape[:2]
 
@@ -40,6 +59,13 @@ def render_frame(frame, result, trail, pose_threshold=0.3, court_threshold=0.5):
     def label(text, point, color):
         x = max(0, min(width - 1, point[0]))
         y = max(14, min(height - 1, point[1]))
+        if not text.isascii():
+            rgb, alpha = _name_sprite(text, color)
+            y = max(0, y - rgb.shape[0])
+            w, ht = min(rgb.shape[1], width - x), min(rgb.shape[0], height - y)
+            frame[y:y + ht, x:x + w] = (rgb[:ht, :w] * alpha[:ht, :w]
+                + frame[y:y + ht, x:x + w] * (1 - alpha[:ht, :w])).astype(np.uint8)
+            return
         cv2.putText(frame, text, (x, y), cv2.FONT_HERSHEY_SIMPLEX,
                     0.45, (0, 0, 0), 3, cv2.LINE_AA)
         cv2.putText(frame, text, (x, y), cv2.FONT_HERSHEY_SIMPLEX,
@@ -63,12 +89,26 @@ def render_frame(frame, result, trail, pose_threshold=0.3, court_threshold=0.5):
                 cv2.circle(frame, xy, 5, (255, 255, 0), -1, cv2.LINE_AA)
                 label(f'C{index}', (xy[0] + 6, xy[1] - 6), (255, 255, 0))
 
+    if player_trails is not None:
+        seen = {p.track_id for p in result.players or []}
+        for track_id in list(player_trails):
+            if track_id not in seen:
+                player_trails[track_id].clear()
     for player in result.players or []:
-        color = (60, 230, 90)
+        color = (60, 230, 90) if player.track_id == 2 else (255, 180, 60)
+        if player_trails is not None and player.track_id is not None:
+            path = player_trails.setdefault(player.track_id, collections.deque(maxlen=24))
+            point = player.foot_pixel
+            if point and all(math.isfinite(v) for v in point):
+                path.append(tuple(round(v) for v in point))
+                if len(path) > 1:
+                    cv2.polylines(frame, [np.asarray(path, dtype=np.int32)], False, color, 2, cv2.LINE_AA)
+            else:
+                path.clear()
         x1, y1, x2, y2 = (round(v) for v in player.bbox_xyxy)
         cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2, cv2.LINE_AA)
-        identity = f'ID {player.track_id}' if player.track_id is not None else 'Person'
-        label(f'{identity} {player.confidence:.2f} | RTMPose-L', (x1, y1 - 8), color)
+        identity = (names or {}).get(player.track_id) or {1: 'Far player', 2: 'Near player'}.get(player.track_id, 'Player')
+        label(identity, (x1, y1 - 8), color)
         points = player.keypoints
         for a, b in _POSE_EDGES:
             if a < len(points) and b < len(points) and visible(points[a], pose_threshold) and visible(points[b], pose_threshold):
@@ -94,8 +134,10 @@ def render_frame(frame, result, trail, pose_threshold=0.3, court_threshold=0.5):
     return frame
 
 
-def annotate_shots(run_dir: Path, output: Path):
-    """Overlay BST shot labels on the existing annotated video from a run directory."""
+def annotate_shots(run_dir: Path, output: Path, names: dict[int, str] | None = None):
+    """Overlay player metrics and shot analysis on the run's shuttle video."""
+    from module7_summary.metrics_overlay import compute_metrics, draw_metrics, scales_from, shot_at
+
     run_dir = Path(run_dir).resolve()
     output  = Path(output).resolve()
     partial = output.with_name(output.stem + ".partial.mp4")
@@ -115,14 +157,17 @@ def annotate_shots(run_dir: Path, output: Path):
             if line.strip():
                 shots.append(json.loads(line))
 
-    # Build frame → shot lookup
-    frame_shot: dict[int, dict] = {}
-    for s in shots:
-        for fi in range(s["start_frame"], s["end_frame"] + 1):
-            frame_shot[fi] = s
+    shots.sort(key=lambda s: s["start_frame"])
+    shot_starts = [s["start_frame"] for s in shots]
 
-    # A standalone M5 replay references the M1-M4 run instead of copying video.
-    candidates = [run_dir / "shuttle.mp4", run_dir / "annotated.mp4"]
+    frames_path = run_dir / "frames.jsonl"
+    if not frames_path.exists():
+        frames_path = run_dir / "frames.partial.jsonl"
+    with frames_path.open(encoding="utf-8") as stream:
+        frame_rows = [json.loads(line) for line in stream if line.strip()]
+
+    # Prefer the M1–M3 annotated video (has player boxes, poses, shuttle trail).
+    candidates = [run_dir / "annotated.mp4", run_dir / "shuttle.mp4"]
     metadata_path = run_dir / "metadata.json"
     if metadata_path.exists():
         metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
@@ -136,112 +181,25 @@ def annotate_shots(run_dir: Path, output: Path):
     if video_path is None:
         raise ValueError(f"No source video found for {run_dir}")
 
-    cap = cv2.VideoCapture(str(video_path))
-    if not cap.isOpened():
-        raise ValueError(f"Cannot open video: {video_path}")
-
-    fps    = cap.get(cv2.CAP_PROP_FPS)
-    width  = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-
     output.parent.mkdir(parents=True, exist_ok=True)
-    writer = cv2.VideoWriter(str(partial), cv2.VideoWriter_fourcc(*"mp4v"), fps, (width, height))
-    if not writer.isOpened():
-        raise RuntimeError(f"Cannot write video: {partial}")
+    total = 0
+    with VideoReader(video_path) as reader, ThreadPoolExecutor(1) as decoder, BackgroundWriter(
+        partial, reader.info.fps, (reader.info.width, reader.info.height),
+    ) as encoder:
+        fps = reader.info.fps
+        metrics = compute_metrics(frame_rows, fps)
+        scales = scales_from(metrics)
+        for index, _, frame in read_ahead(reader, decoder):
+            shot = shot_at(shots, shot_starts, index)
+            draw_metrics(frame, metrics, index, shot, names or {}, fps, scales)
+            encoder.submit(cv2.VideoWriter.write, frame)
+            total += 1
 
-    # Side colors, with yellow for low-confidence predictions (still labeled).
-    _COLORS = {
-        "Top":    (220, 100,  40),   # BGR: deep blue
-        "Bottom": ( 30, 140, 230),   # BGR: orange
-        None:     (110, 110, 110),   # BGR: gray
-    }
-
-    scale = max(0.5, width / 1920)
-    pad   = round(14 * scale)
-    lh    = round(34 * scale)   # line height
-    fs    = 0.75 * scale        # font scale
-
-    index = 0
-    try:
-        while True:
-            ok, frame = cap.read()
-            if not ok:
-                break
-            shot = frame_shot.get(index)
-            if shot is not None:
-                side  = shot.get("player_side")
-                label = shot["shot_type_en"]
-                conf  = shot["confidence"]
-                pid   = shot.get("hitter_id")
-                color = _COLORS.get(side, _COLORS[None])
-                if shot.get("low_confidence", False):
-                    color = (0, 230, 255)
-
-                # Banner background (top-left)
-                bw = round(400 * scale)
-                bh = lh * 3 + pad * 2
-                x0, y0 = pad, pad
-                overlay = frame.copy()
-                cv2.rectangle(overlay, (x0, y0), (x0 + bw, y0 + bh), (20, 20, 20), -1)
-                cv2.addWeighted(overlay, 0.55, frame, 0.45, 0, frame)
-
-                # Colored left accent bar
-                cv2.rectangle(frame, (x0, y0), (x0 + round(5 * scale), y0 + bh), color, -1)
-
-                x_text = x0 + round(12 * scale)
-
-                # Line 1: shot type
-                is_hit_frame = index == shot["start_frame"]
-                prefix = "HIT  " if is_hit_frame else "SHOT "
-                cv2.putText(frame, f"{prefix}#{shot['shot_id']}  {label}",
-                            (x_text, y0 + pad + lh - round(6*scale)),
-                            cv2.FONT_HERSHEY_SIMPLEX, fs * 1.1, color,
-                            max(1, round(2 * scale)), cv2.LINE_AA)
-
-                # Line 2: side + player
-                side_str = side if side else "Side unavailable"
-                player_str = f"P{pid}" if pid else "P?"
-                low_marker = " | LOW CONF" if shot.get("low_confidence", False) else ""
-                cv2.putText(frame, f"{side_str}  |  {player_str}{low_marker}",
-                            (x_text, y0 + pad + lh * 2 - round(4*scale)),
-                            cv2.FONT_HERSHEY_SIMPLEX, fs * 0.85, (200, 200, 200),
-                            max(1, round(1 * scale)), cv2.LINE_AA)
-
-                # Line 3: confidence bar
-                bar_w = bw - round(70 * scale)
-                bar_h = round(8 * scale)
-                bx = x_text
-                by = y0 + pad + lh * 3 - round(10 * scale)
-                cv2.rectangle(frame, (bx, by), (bx + bar_w, by + bar_h), (60, 60, 60), -1)
-                cv2.rectangle(frame, (bx, by), (bx + round(bar_w * conf), by + bar_h), color, -1)
-                cv2.putText(frame, f"{conf*100:.0f}%",
-                            (bx + bar_w + round(6*scale), by + bar_h),
-                            cv2.FONT_HERSHEY_SIMPLEX, fs * 0.7, (200, 200, 200),
-                            1, cv2.LINE_AA)
-
-                # Flash border on first frame of shot
-                if is_hit_frame:
-                    thick = max(3, round(8 * scale))
-                    cv2.rectangle(frame, (thick, thick),
-                                  (width - thick, height - thick), color, thick)
-
-            # Frame counter bottom-right
-            cv2.putText(frame, f"frame {index}",
-                        (width - round(140 * scale), height - round(12 * scale)),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.55 * scale, (180, 180, 180),
-                        1, cv2.LINE_AA)
-
-            writer.write(frame)
-            index += 1
-    finally:
-        cap.release()
-        writer.release()
-
-    if index == 0:
+    if total == 0:
         raise ValueError("Source video has no frames")
 
     partial.replace(output)
-    return {"output": str(output), "frames": index, "shots_annotated": len(shots), "fps": fps}
+    return {"output": str(output), "frames": total, "shots_annotated": len(shots), "fps": fps}
 
 
 def write_json(path: Path, value):
@@ -276,7 +234,7 @@ def annotate_hits(video: Path, hits_path: Path, output: Path, hold_s: float = 0.
             by_frame[index] = event
         ordered = sorted(by_frame)
         output.parent.mkdir(parents=True, exist_ok=True)
-        writer = cv2.VideoWriter(str(partial), cv2.VideoWriter_fourcc(*"mp4v"), fps, (width, height))
+        writer = cv2.VideoWriter(str(partial), cv2.VideoWriter_fourcc(*"avc1"), fps, (width, height))
         if not writer.isOpened():
             raise RuntimeError(f"Cannot write review video: {partial}")
         scale = max(.4, width / 1920)
@@ -368,7 +326,7 @@ class Pipeline:
                     )
         raise ValueError(f"Video has no court initialization frame {init_index}")
 
-    def run(self, video, output_dir, stdb=None):
+    def run(self, video, output_dir, stdb=None, near_name: str = "", far_name: str = ""):
         """Run the pipeline.
 
         stdb: optional StdbClient instance.  When provided, results are pushed
@@ -388,6 +346,8 @@ class Pipeline:
         metadata = {
             "schema_version": "1.0",
             "status": "running",
+            "player_names": {"1": far_name or "Far player", "2": near_name or "Near player"},
+            "title": f"{near_name or 'Near player'} vs {far_name or 'Far player'}",
             "video": video_info,
             "modules": {
                 "m1": self.players is not None,
@@ -429,7 +389,8 @@ class Pipeline:
                 self.players.reset()
 
             count = self._write_video(
-                video, video_path, partial, calibration, samples, pose_threshold, court_threshold
+                video, video_path, partial, calibration, samples, pose_threshold, court_threshold,
+                names={1: far_name, 2: near_name},
             )
 
             if samples is not None:
@@ -446,6 +407,8 @@ class Pipeline:
                         str(video),
                         float(video_info["fps"]),
                         count,
+                        near_name=near_name,
+                        far_name=far_name,
                     )
                     frame_rows = []
                     with partial.open(encoding="utf-8") as stream:
@@ -493,7 +456,11 @@ class Pipeline:
                     k: v for k, v in shot_summary.items() if k != "shots"
                 }
                 LOGGER.info("Rendering M5 labels to shots.mp4")
-                annotate_shots(output_dir, output_dir / "shots.mp4")
+                # track_id=1 → top of frame = far from camera; track_id=2 → near
+                ann_names = {}
+                if far_name: ann_names[1] = far_name
+                if near_name: ann_names[2] = near_name
+                annotate_shots(output_dir, output_dir / "shots.mp4", ann_names or None)
 
                 # ── DB push: shot_class + summary (after M4+M5) ───────────────
                 if stdb is not None:
@@ -504,6 +471,8 @@ class Pipeline:
                         stdb.push_shot_classes(run_id, hits_dicts, shots_dicts)
                         LOGGER.info("Pushing summary to SpacetimeDB")
                         stdb.push_summary(run_id, frame_rows, hits_dicts, shots_dicts)
+                        LOGGER.info("Pushing analysed video to SpacetimeDB")
+                        stdb.push_analyzed_video(run_id, video_path)
                     except Exception as exc:
                         LOGGER.warning("SpacetimeDB push (shots/summary) failed: %s", exc)
 
@@ -538,43 +507,48 @@ class Pipeline:
 
         return output_dir
 
-    def _write_video(self, video, video_path, partial, calibration, samples, pose_threshold, court_threshold):
+    def _write_video(self, video, video_path, partial, calibration, samples, pose_threshold, court_threshold, names=None):
         trail = collections.deque(maxlen=_TRAIL_LEN)
+        player_trails = {}
         reference_index, reference = calibration if calibration is not None else (None, None)
         matrix = reference.homography if reference is not None else None
+        batch_size = getattr(getattr(self.players, "settings", None), "player_batch_size", 1)
         count = 0
-        writer = None
-        try:
-            with VideoReader(video) as reader, partial.open("w", encoding="utf-8") as stream:
-                writer = cv2.VideoWriter(
-                    str(video_path), cv2.VideoWriter_fourcc(*"mp4v"), reader.info.fps,
-                    (reader.info.width, reader.info.height),
-                )
-                if not writer.isOpened():
-                    raise RuntimeError(f"Cannot open video writer: {video_path}")
-                for index, timestamp, frame in reader:
-                    result = FrameResult(index, timestamp)
-                    if self.court is not None:
+
+        def save(writer, stream, frame, result):
+            stream.write(json.dumps(asdict(result), allow_nan=False) + "\n")
+            writer.write(render_frame(frame, result, trail, pose_threshold, court_threshold,
+                                      names=names, player_trails=player_trails))
+
+        with VideoReader(video) as reader, partial.open("w", encoding="utf-8") as stream, \
+                ThreadPoolExecutor(1) as decoder, BackgroundWriter(
+                    video_path, reader.info.fps, (reader.info.width, reader.info.height),
+                ) as encoder:
+            frames = read_ahead(reader, decoder, batch_size * 2)
+            while chunk := list(islice(frames, batch_size)):
+                results = [FrameResult(index, timestamp) for index, timestamp, _ in chunk]
+                if self.court is not None:
+                    for result, (index, _, frame) in zip(results, chunk):
                         court = reference if index == reference_index else self.court.process(frame)
                         result.court = replace(court or Court(), homography=matrix)
-                    if self.players is not None:
-                        result.players = self.players.process(frame, court=result.court)
-                        for player in result.players:
+                if self.players is not None:
+                    tracked = self.players.process_batch([frame for *_, frame in chunk],
+                                                         [result.court for result in results])
+                    for result, players in zip(results, tracked):
+                        result.players = players
+                        for player in players:
                             player.court_xy_m = project_point(matrix, player.foot_pixel)
                             player.on_court = on_court(player.court_xy_m)
+                for result, (index, _, frame) in zip(results, chunk):
                     if samples is not None:
                         if index not in samples:
                             raise ValueError(f"Shuttle output missing decoded video frame {index}")
                         result.shuttle = samples[index]
                         result.shuttle.court_projection_m = project_point(matrix, result.shuttle.pixel)
-                    stream.write(json.dumps(asdict(result), allow_nan=False) + "\n")
-                    writer.write(render_frame(frame, result, trail, pose_threshold, court_threshold))
-                    count += 1
-                    if count % 100 == 0:
-                        LOGGER.info("Processed %s frames", count)
-        finally:
-            if writer is not None:
-                writer.release()
+                    encoder.submit(save, stream, frame, result)
+                previous, count = count, count + len(chunk)
+                if count // 100 > previous // 100:
+                    LOGGER.info("Processed %s frames", count)
         if count == 0:
             raise ValueError("Video contains no decodable frames")
         LOGGER.info("Annotated video written to %s", video_path)

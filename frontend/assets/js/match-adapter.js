@@ -8,9 +8,7 @@
   var C = M.court, KNOWN = { serve: 1, clear: 1, drop: 1, smash: 1, net: 1, drive: 1, lift: 1, push: 1, block: 1 };
 
   function nearId(run) {
-    var votes = {};
-    run.shots.forEach(function (s) { if (s.playerId) votes[s.playerId] = (votes[s.playerId] || 0) + (s.side === 'Bottom' ? 1 : s.side === 'Top' ? -1 : 0); });
-    return (votes[1] || 0) > (votes[2] || 0) ? 1 : 2;
+    return 2; // Module 1 fixes P2 to the near end and P1 to the far end.
   }
   function round(v) { return Math.round(v * 100) / 100; }
 
@@ -28,6 +26,7 @@
     var rallies = [], games = [], game = null;
     decided.forEach(function (r) {
       var list = run.shots.filter(function (s) { return s.id >= r.firstEventId && s.id <= r.lastEventId; });
+      if (!list.length) return;
       if (!game || game.n !== r.game) {
         game = { n: r.game, first: rallies.length, last: rallies.length, score: { A: 0, B: 0 }, start: list[0].t };
         games.push(game);
@@ -77,7 +76,7 @@
       A: { id: 'A', name: 'Near player', short: 'Near', code: 'P' + near, hand: null, trackId: near },
       B: { id: 'B', name: 'Far player', short: 'Far', code: 'P' + (3 - near), hand: null, trackId: 3 - near }
     };
-    [['A', job && safe(job.near)], ['B', job && safe(job.far)]].forEach(function (x) {
+    [['A', (job && safe(job.near)) || safe(run.nearName)], ['B', (job && safe(job.far)) || safe(run.farName)]].forEach(function (x) {
       if (!x[1]) return;
       var p = players[x[0]];
       p.name = x[1]; p.short = x[1].split(/\s+/).pop(); p.code = p.short.slice(0, 3).toUpperCase();
@@ -92,12 +91,12 @@
       };
     });
     return {
-      isLive: true, id: run.id, title: run.id, players: players, games: games, rallies: rallies,
+      isLive: true, id: run.id, title: players.A.name + ' vs ' + players.B.name, players: players, games: games, rallies: rallies,
       winner: wa === wb ? null : (wa > wb ? 'A' : 'B'), duration: round(rallies[rallies.length - 1].end - rallies[0].start),
       video: { src: (job && job.video_url) || null, poster: null, length: run.durationS || round(rallies[rallies.length - 1].end + 5) },
       turningPoints: turning, runs: streaks(4),
       undecided: run.rallies.length - decided.length, scoreReliable: run.rallies.every(function (r) { return r.scoreReliable; }),
-      source: run
+      source: Object.assign({}, run, {nearName: players.A.name, farName: players.B.name}), trackingFrames: frames
     };
   }
 
@@ -112,7 +111,14 @@
     var run = await api.getRun(id, { signal: signal });
     if (!run.rallies || !run.rallies.some(function (r) { return r.winnerId; })) throw new api.ApiError('no_rallies');
     var frames = await api.getFrames(run, { signal: signal, onProgress: onProgress });
-    return hydrate(toMatch(run, frames, await GM.pipeline.jobIfAny(id)));
+    var job = await GM.pipeline.jobIfAny(id);
+    var match = toMatch(run, frames, job);
+    if (job && job.analyzed_video_url) match.video.src = job.analyzed_video_url;
+    else {
+      var url = await api.getAnalyzedVideo(id, { signal: signal });
+      if (url) { match.video.src = url; window.addEventListener('pagehide', function () { URL.revokeObjectURL(url); }, {once: true}); }
+    }
+    return hydrate(match);
   };
   GM.toLiveMatch = toMatch;
 })();

@@ -11,6 +11,49 @@
 <link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@500;700;800;900&family=Big+Shoulders+Stencil+Display:wght@800;900&family=Archivo:ital,wdth,wght@0,62..125,400..800;1,62..125,400..700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="../assets/css/goodminton.css">
 <link rel="stylesheet" href="strung.css">
+<style>
+.vs-reveal {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  gap: 0 20px;
+  align-items: stretch;
+  padding: 28px 0 8px;
+}
+.vs-name {
+  font-family: 'Big Shoulders Stencil Display','Big Shoulders Display','Arial Narrow',sans-serif;
+  font-weight: 900;
+  font-size: clamp(1.6rem, 4.5vw, 3rem);
+  text-transform: uppercase;
+  letter-spacing: .02em;
+  line-height: .92;
+  color: #f4f2ff;
+  padding: 18px 24px;
+  border: 1.5px solid #7828ff;
+  background: #0e011f;
+  box-shadow: 0 0 28px rgba(120,40,255,.35);
+  display: flex;
+  align-items: center;
+}
+.vs-name.near { justify-content: flex-end; border-left: 3px solid #ff2ee6; animation: vsl .65s cubic-bezier(.23,1,.32,1) both; }
+.vs-name.far  { justify-content: flex-start; border-right: 3px solid #7828ff; animation: vsr .65s cubic-bezier(.23,1,.32,1) .12s both; }
+.vs-sep {
+  font-family: 'Big Shoulders Display','Arial Narrow',sans-serif;
+  font-weight: 900; font-size: clamp(1.1rem, 2.2vw, 1.6rem); letter-spacing: .2em;
+  color: #dbc4ff; display: flex; align-items: center;
+  animation: vspop .4s ease-out .55s both;
+}
+@keyframes vsl   { from { transform: translateX(-72px); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes vsr   { from { transform: translateX( 72px); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes vspop { from { transform: scale(.5);          opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes fadein { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+.vs-after { animation: fadein .45s ease-out both; }
+@media (max-width: 500px) {
+  .vs-reveal { grid-template-columns: 1fr; gap: 8px; padding-bottom: 0; }
+  .vs-name.near { justify-content: center; border-left: 1.5px solid #7828ff; border-top: 3px solid #ff2ee6; }
+  .vs-name.far  { justify-content: center; border-right: 1.5px solid #7828ff; border-bottom: 3px solid #7828ff; }
+  .vs-sep { justify-content: center; padding: 4px 0; }
+}
+</style>
 </head>
 <body class="world-strung">
 <a class="skip" href="#main">Skip to status</a>
@@ -160,7 +203,7 @@
     function paint(job) {
       if (!named) {
         named = true;
-        if (job.near && job.far) { title.textContent = job.near + ' v ' + job.far; document.title = 'Analysing ' + job.near + ' v ' + job.far + ' — Goodminton'; }
+        if (job.near && job.far) { title.textContent = job.near + ' vs ' + job.far; document.title = 'Analysing ' + job.near + ' vs ' + job.far + ' — Goodminton'; }
         var s = document.createElement('span'), b = document.createElement('b'); b.textContent = job.filename; s.appendChild(b); facts.appendChild(s);
       }
       var active = job.status === 'queued' ? 0 : -1;
@@ -173,6 +216,7 @@
         else setRow(i, 'todo', job.status === 'cancelled' ? 'Cancelled' : (job.status === 'queued' && i === 0 ? 'In queue' : 'Waiting'));
       });
     }
+    function esc(s) { return String(s).replace(/[<>&"]/g, function(c) { return {'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]; }); }
     function complete(job) {
       var wizard2 = document.querySelector('[data-wiz2]'), wizard3 = document.querySelector('[data-wiz3]');
       wizard2.removeAttribute('aria-current'); wizard2.classList.add('done'); wizard3.setAttribute('aria-current', 'step');
@@ -181,12 +225,36 @@
       cnt.textContent = info.rallies;
       note.textContent = info.decided + ' of ' + info.rallies + ' had a clear result.';
       var links = info.decided ? [['Open the full report', 'report.html?run=' + encodeURIComponent(job.id)], ['See this run', runUrl]] : [['See this run', runUrl]];
-      if (job.warnings && job.warnings.length) {
-        notice('Analysed, but not fully published', 'The analysis finished, but some results couldn’t be saved to the database, so this run may be missing or incomplete. Check the SpacetimeDB login on the analysis computer.', links);
-        return;
+      var hasWarnings = !!(job.warnings && job.warnings.length);
+      var hasNames = !!(job.near && job.far && !hasWarnings);
+
+      outcomeBox.textContent = '';
+      if (hasNames) {
+        var vsCard = document.createElement('div');
+        vsCard.className = 'vs-reveal';
+        vsCard.innerHTML = '<div class="vs-name near">' + esc(job.near) + '</div><div class="vs-sep">VS</div><div class="vs-name far">' + esc(job.far) + '</div>';
+        outcomeBox.appendChild(vsCard);
       }
-      notice('Analysis ready', info.rallies + (info.rallies === 1 ? ' rally' : ' rallies') + ' found in your video.', links, true);
-      outcomeBox.querySelector('a').focus();
+
+      function buildNotice() {
+        var box = document.createElement('div');
+        box.className = 'notice' + (hasWarnings ? '' : ' notice-ok') + (hasNames ? ' vs-after' : '');
+        if (hasNames) box.style.marginTop = '20px';
+        var h2 = document.createElement('h2');
+        h2.textContent = hasWarnings ? 'Analysed, but not fully published' : 'Analysis ready';
+        box.appendChild(h2);
+        var p = document.createElement('p');
+        p.textContent = hasWarnings
+          ? 'The analysis finished, but some results couldn’t be saved to the database, so this run may be missing or incomplete. Check the SpacetimeDB login on the analysis computer.'
+          : info.rallies + (info.rallies === 1 ? ' rally' : ' rallies') + ' found in your video.';
+        box.appendChild(p);
+        var row = document.createElement('div'); row.className = 'hero-actions';
+        links.forEach(function (l, i) { var a = document.createElement('a'); a.className = 'btn' + (i ? '' : ' btn-primary'); a.href = l[1]; a.textContent = l[0]; row.appendChild(a); });
+        box.appendChild(row);
+        outcomeBox.appendChild(box);
+        outcomeBox.querySelector('a').focus();
+      }
+      setTimeout(buildNotice, hasNames ? 1100 : 0);
     }
     function tick() {
       P.job(jobId).then(function (job) {

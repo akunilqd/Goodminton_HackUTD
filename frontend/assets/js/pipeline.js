@@ -49,7 +49,7 @@
     job: function (id) { return request('/api/jobs/' + encodeURIComponent(id)); },
     cancel: function (id) { return request('/api/jobs/' + encodeURIComponent(id) + '/cancel', { method: 'POST', headers: HEADERS }); },
     // Names and the original video exist only for runs uploaded through this service.
-    jobIfAny: function (id) { return /^job_/.test(id || '') && served ? this.job(id).catch(function () { return null; }) : Promise.resolve(null); },
+    jobIfAny: function (id) { return served && id ? this.job(id).catch(function () { return null; }) : Promise.resolve(null); },
     NOT_RUNNING: NOT_RUNNING
   };
 })();

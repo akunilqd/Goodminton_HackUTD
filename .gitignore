@@ -15,6 +15,7 @@ __pycache__/
 *.pyd
 .venv/
 venv/
+.venv-setup/
 *.egg-info/
 
 # Node / SpacetimeDB module

@@ -83,9 +83,9 @@
     });
   }
 
-  async function attempt(query, signal) {
+  async function attempt(query, signal, timeoutMs) {
     var ctl = new AbortController(), timedOut = false;
-    var timer = setTimeout(function () { timedOut = true; ctl.abort(); }, cfg.timeoutMs);
+    var timer = setTimeout(function () { timedOut = true; ctl.abort(); }, timeoutMs);
     function forward() { ctl.abort(); }
     if (signal) {
       if (signal.aborted) ctl.abort(); else signal.addEventListener('abort', forward, { once: true });
@@ -112,7 +112,7 @@
   async function sql(query, opts) {
     var signal = opts && opts.signal;
     for (var i = 0; ; i++) {
-      try { return await attempt(query, signal); }
+      try { return await attempt(query, signal, (opts && opts.timeoutMs) || cfg.timeoutMs); }
       catch (e) {
         if (!AUTO_RETRY[e.code] || i >= cfg.retries) throw e;
         var backoff = cfg.retryBaseMs * Math.pow(2, i) + Math.random() * cfg.retryBaseMs;
@@ -140,7 +140,7 @@
   function baseName(p) { return text(p).split(/[\\/]/).pop(); }
 
   // ---------- normalisers: backend rows → the shapes the UI uses
-  var META = ['run_id', 'video_source', 'fps', 'total_frames', 'created_at'];
+  var META = ['run_id', 'video_source', 'fps', 'total_frames', 'created_at', 'near_name', 'far_name'];
   var SUMMARY = ['run_id', 'p_1_total_distance_m', 'p_2_total_distance_m', 'avg_shuttle_speed_ms', 'heatmap_p_1_json', 'heatmap_p_2_json'];
   var SHOTS = ['event_id', 'frame_index', 'timestamp_s', 'player_id', 'hit_score', 'hit_type', 'confidence', 'player_side'];
   var RALLIES = ['rally_index', 'game', 'start_frame', 'end_frame', 'start_s', 'end_s', 'shot_count', 'first_event_id', 'last_event_id', 'last_hitter_id', 'winner_id', 'outcome', 'landing_x', 'landing_y', 'score_p_1', 'score_p_2', 'score_reliable'];
@@ -148,7 +148,7 @@
 
   function normMeta(r) {
     var fps = num(r.fps), frames = num(r.total_frames) || 0, ms = num(r.created_at);
-    return { id: text(r.run_id), videoName: baseName(r.video_source), fps: fps, totalFrames: frames, durationS: fps > 0 ? frames / fps : null, createdAt: ms ? new Date(ms) : null };
+    return { id: text(r.run_id), videoName: baseName(r.video_source), fps: fps, totalFrames: frames, durationS: fps > 0 ? frames / fps : null, createdAt: ms ? new Date(ms) : null, nearName: text(r.near_name) || '', farName: text(r.far_name) || '' };
   }
   function normHeat(json) {
     var pts;
@@ -223,6 +223,20 @@
     return run;
   }
 
+  // SpacetimeDB sends byte arrays as hex text. Null when the run has no analysed video.
+  function hexToBytes(hex) {
+    var out = new Uint8Array(hex.length >> 1);
+    for (var i = 0; i < out.length; i++) out[i] = parseInt(hex.substr(i * 2, 2), 16);
+    return out;
+  }
+  function getAnalyzedVideo(id, opts) {
+    var o = Object.assign({ timeoutMs: 120000 }, opts || {});
+    return select(['video'], 'analyzed_video', 'run_id = ' + quoteId(id), o).then(function (rows) {
+      if (!rows.length || typeof rows[0].video !== 'string' || !rows[0].video) return null;
+      return URL.createObjectURL(new Blob([hexToBytes(rows[0].video)], { type: 'video/mp4' }));
+    }, function (e) { if (e.code === 'contract') return null; throw e; });
+  }
+
   // Per-frame data can be very large, so it is paged by frame range (the server has no OFFSET).
   async function getFrames(run, opts) {
     opts = opts || {};
@@ -235,5 +249,5 @@
     return frames.sort(function (a, b) { return a.frame - b.frame; });
   }
 
-  GM.api = { config: cfg, ApiError: ApiError, sql: sql, listRuns: listRuns, getRun: getRun, getRallies: getRallies, getFrames: getFrames };
+  GM.api = { config: cfg, ApiError: ApiError, sql: sql, listRuns: listRuns, getRun: getRun, getRallies: getRallies, getFrames: getFrames, getAnalyzedVideo: getAnalyzedVideo };
 })();
