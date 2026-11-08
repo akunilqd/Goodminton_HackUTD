@@ -7,7 +7,7 @@ Modules 4–6 (hit detection, shot classification and analytics) are outside thi
 HackUTD/
 ├── module1_players/       # YOLO11m → ByteTrack → RTMPose-L, 17 joints
 ├── module2_shuttle/       # TrackNetV3 → InpaintNet, aligned shuttle positions
-├── module3_court/         # 30 court keypoints → homography → court metres
+├── module3_court/         # 4 court corners → fixed homography → court metres
 ├── configs/              # Example manual court calibration
 ├── main.py               # Run, check setup, inspect court keypoints
 ├── pipeline.py           # Join module outputs by frame and write results
@@ -54,11 +54,11 @@ the other requirements, keeping PyTorch and MMCV compatible:
 
 The CUDA wheel pairing follows the [PyTorch version table](https://docs.pytorch.org/get-started/previous-versions/).
 `check` reports each selected module's device and checks Module 2 in its own Python
-environment. `gpu_half = True` enables FP16 for both YOLO models, mixed precision
+environment. `gpu_half = True` enables FP16 for YOLO player detection, mixed precision
 for RTMPose, and FP16 for TrackNet. Set it to `False` for FP32 inference while
 keeping CUDA enabled. InpaintNet keeps FP32 coordinates on the GPU. cuDNN kernel
-selection and pinned TrackNet batches accelerate CUDA inference. ByteTrack,
-video decoding, CSV/JSON output and OpenCV homography retain their CPU paths.
+selection accelerates CUDA inference. ByteTrack, video decoding and OpenCV homography
+retain their CPU paths.
 
 ### Module 1: player detection, tracking and pose
 
@@ -90,7 +90,7 @@ MMPose checkout because configs import relative base files.
 M1 uses M3 court keypoints to keep only the two singles players. Run M1 together
 with M3 (`--modules 1 3`, or all three modules). People outside the court are
 excluded before pose inference; a small border tolerance retains established
-players near the lines. This filter works without a metre-coordinate template.
+players near the lines.
 
 The first pair receives ID 1 (initially far) and ID 2 (initially near). These IDs
 remain reserved until the video is reset. Matching uses ByteTrack IDs and the
@@ -113,10 +113,9 @@ git clone https://github.com/qaz812345/TrackNetV3.git external/TrackNetV3
 Install its dependencies following that repository's instructions, preferably in a
 separate environment because its published dependency pins are older. Set
 `tracknet_python` to that environment's Python executable. The default
-`sys.executable` uses the Python running `main.py`. The local inference script accepts
-`--device` and `--half`, which the adapter supplies from the shared settings.
-If you use another Python environment, install its CUDA build of PyTorch too.
-Keep these local changes to `external/TrackNetV3/predict.py` when updating upstream.
+`sys.executable` uses the Python running `main.py`. The adapter supplies the device and
+precision from the shared settings. If you use a separate environment for CUDA,
+install its CUDA build of PyTorch too.
 
 Download and extract the [official checkpoint archive](https://drive.google.com/file/d/1CfzE87a0f6LhBp0kniSl1-89zaLCZ8cA/view)
 linked in the upstream README. Put these files in `weights/`:
@@ -124,34 +123,27 @@ linked in the upstream README. Put these files in `weights/`:
 - `TrackNet_best.pt`
 - `InpaintNet_best.pt`
 
-The adapter runs the upstream CLI twice: once for raw positions and once with
-InpaintNet. This preserves both trajectories and makes corrections inspectable,
-at the cost of running TrackNet twice. It uses non-overlapping temporal windows
-and upstream large-video mode. Each subprocess has a configurable timeout and
-its own log. Use `.mp4` input and a new output directory for each run.
+The adapter runs TrackNet once and passes the trajectory to InpaintNet in memory.
+The models run in a separate process with a configurable timeout, and progress
+appears in the terminal. Use `.mp4` input and a new output directory for each run.
 
 ### Module 3: court detection and mapping
 
-The [court model](https://huggingface.co/Huydinh1205/court_yolo11n_pose) downloads
-automatically when `court_weights` is `None`. It produces **30 keypoints**, correcting
-the design's older references to 14.
+[CourtKeyNet](https://huggingface.co/Cracked-ANJ/CourtKeyNet) detects four corners
+in far-left, far-right, near-right, near-left order. It runs once at
+`court_init_frame` and uses the same homography for the whole fixed-camera clip.
+If `court_weights` is `None`, the detector uses the local
+`weights/courtkeynet_finetuned.safetensors` checkpoint when present or downloads
+the pinned weights.
 
-For automatic metre mapping, set `court_template` to a JSON file containing
-`court_points_m`: 30 distinct `[x, y]` pairs in the model's exact keypoint order.
-The model card describes a snake layout but does not publish the full coordinate
-table. No guessed table is enabled. With no template, detection still works and
-returns `status="template_required"`, with mapping fields set to `null`.
-
-Inspect numbered detections to establish the correspondence using the training
-annotations:
+Inspect the corners on a candidate calibration frame:
 
 ```powershell
 python main.py court-frame data/match.mp4 --frame 0 --output outputs/court-inspection
 ```
 
-This exports `court.jpg` and `court.json`. Use court-floor points only. Metre
-coordinates run x across the 6.10 m doubles width and y along the 13.40 m length;
-use a consistent origin and orientation.
+This exports `court.jpg` and `court.json`. Metre coordinates run x across the
+6.10 m doubles width and y along the 13.40 m length from the far-left corner.
 
 For a **fixed camera**, use manual calibration without the court ML model:
 
@@ -161,10 +153,8 @@ For a **fixed camera**, use manual calibration without the court ML model:
 3. Set `court_calibration = Path("configs/my_court.json")` in `config.py`.
 
 The example orders the doubles corners far-left, far-right, near-right, near-left.
-Manual calibration must be redone after a camera move, zoom, or cut. The automatic
-detector recalculates geometry each frame and does not reuse a stale fit when
-detection fails. RANSAC rejects outliers; insufficient or degenerate geometry
-produces a status and no homography. Calibration resolution mismatches fail.
+Start a new calibration after a camera move, zoom, or cut. Calibration resolution
+mismatches and invalid court corners fail with an error.
 
 ## Run
 
@@ -189,46 +179,19 @@ Change settings directly in `config.py`, then rerun the command.
 
 ## Output
 
-| File | Contents |
-| --- | --- |
-| `frames.jsonl` | One JSON record per decoded frame: index, timestamp, players, shuttle, court |
-| `metadata.json` | Video dimensions/FPS, enabled modules, processed frame count and run status |
-| `shuttle.mp4` / `annotated.mp4` | Annotated video: player boxes + track IDs, RTMPose-L joints/skeleton, numbered court keypoints, and shuttle trail when M2 is enabled |
-| `shuttle.csv` | Raw/repaired pixel positions, timestamps, visibility, provenance and court projection |
-| `shuttle/raw/` | Upstream TrackNet CSV and inference log |
-| `shuttle/inpainted/` | Upstream TrackNet + InpaintNet CSV and inference log |
+`main.py run` writes one file, `annotated.mp4`, to the selected output directory.
+It preserves the source resolution and FPS and contains no audio. When Module 3
+is enabled, it draws a top-down mini-court directly into each frame using Fixed H.
+Selected modules add player tracks and poses, court keypoints, and a shuttle trail.
+The mini-court shows player positions. The shuttle trail appears on the main video.
 
-The annotated video is `shuttle.mp4` when M2 is enabled (preserving the existing
-video filename), or `annotated.mp4` when running M1/M3 without M2. It preserves
-source resolution and FPS and contains no audio. Overlays use the existing
-`pose_confidence` and `court_keypoint_confidence` thresholds. Court points are
-labelled C0?C29; no guessed court-line connections are drawn. Inference always
-receives the original frame before any drawing.
-
-Module 2 files are only written when selected. Disabled module fields are `null`;
-an enabled player module with no detections returns `[]`. Keypoints are
-`[x_pixels, y_pixels, confidence]`. Player keypoints use COCO order: nose, eyes,
-ears, shoulders, elbows, wrists, hips, knees, ankles, with left before right.
-Boxes use `[x1, y1, x2, y2]`. Frames are zero-based; timestamps are `frame_index/fps`.
-Use constant-frame-rate footage for accurate timing.
-
-Missing shuttle coordinates remain `null`. Upstream exports binary visibility,
-not a probability, so shuttle `confidence` is `null` (blank in CSV). `rectified`
-means the final exported coordinate differs from the raw one; it is not the
-upstream network's internal repair mask. `source` is `tracknet`, `inpaintnet` or
-`missing` based on that comparison.
-
-Player court positions approximate ground contact. An airborne shuttle's
-`court_projection_m` is a projection onto the floor plane, **not its physical
-3D location or a reliable speed measurement**.
-
-Runs never overwrite an existing output directory. Failed runs retain
-`frames.partial.jsonl` when available and mark metadata as failed; a complete
-`frames.jsonl` is published only after frame alignment succeeds.
+Tracking and projection results stay in memory. Each run requires a new output
+directory. If a run fails, the incomplete video is removed.
 
 ## Verification
 
-GPU verification on the RTX 3050 6 GB used the existing `.venv-setup` environment
+Previous GPU verification with the legacy 30-point detector used the RTX 3050
+6 GB and the existing `.venv-setup` environment
 (PyTorch 2.1.0+cu118, torchvision 0.16.0+cu118, MMCV 2.1.0 built for CUDA 11.8):
 
 - `main.py check` reports `cuda:0` for all three modules; `pip check` passes.
@@ -249,10 +212,8 @@ were returned on 247 frames, one on 3 frames, with no far/near identity swaps in
 this clip. Reordered detections, changed ByteTrack IDs, short loss/recovery,
 missing court detections and reset were checked in memory without creating files.
 
-A verified court template or manual calibration is still required for homography.
 FP16 can slightly change numerical predictions; use `gpu_half = False` for FP32.
 
 The core video path streams frames; Module 2 retains coordinate records in memory.
 Long videos, occlusions and camera cuts can reduce model/tracker accuracy.
-Third-party code and weights retain their own licenses; the court model and
-Ultralytics use AGPL-3.0 terms.
+Third-party code and weights retain their own licenses.

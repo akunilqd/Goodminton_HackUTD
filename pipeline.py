@@ -1,17 +1,16 @@
 """Coordinate modules without coupling their inference implementations."""
 
 import collections
-import csv
 import json
 import logging
 import math
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 
 import cv2
 
-from module3_court.geometry import on_court, project_point
-from schemas import FrameResult
+from module3_court.geometry import draw_mini_court, fit_detector_homography, on_court, project_point
+from schemas import Court, FrameResult
 from video import VideoReader
 
 LOGGER = logging.getLogger(__name__)
@@ -96,123 +95,100 @@ class Pipeline:
         self.shuttle = shuttle
         self.court = court
 
-    def run(self, video: Path, output_dir: Path) -> Path:
-        # Open before creating artifacts; never overwrite an earlier run.
+    def _calibrate(self, video, confidence):
+        """Read ahead for the first valid H before writing any output frames."""
+        init_frame = getattr(self.court, "init_frame", 0)
+        reset = getattr(self.court, "reset", None)
+        if reset is not None:
+            reset()
         with VideoReader(video) as reader:
-            output_dir = output_dir.resolve()
-            output_dir.mkdir(parents=True, exist_ok=False)
-            metadata = {
-                "schema_version": "1.0",
-                "status": "running",
-                "video": asdict(reader.info),
-                "modules": {
-                    "m1": self.players is not None,
-                    "m2": self.shuttle is not None,
-                    "m3": self.court is not None,
-                },
-                "processed_frames": 0,
-                "court_coordinates": "metres: x across 6.10m, y along 13.40m; template origin",
-                "shuttle_projection": "court-plane projection; airborne 3D position is unknown",
-            }
-            metadata_path = output_dir / "metadata.json"
-            write_json(metadata_path, metadata)
-            partial = output_dir / "frames.partial.jsonl"
-            count = 0
-            writer = None
-            video_path = output_dir / ("shuttle.mp4" if self.shuttle is not None else "annotated.mp4")
-            trail = collections.deque(maxlen=_TRAIL_LEN)
+            for index, _, frame in reader:
+                if index < init_frame:
+                    continue
+                court = self.court.process(frame)
+                if court is None:
+                    continue
+                if court.homography is not None:
+                    return index, court
+                try:
+                    matrix, inliers, error = fit_detector_homography(court.keypoints, confidence)
+                except ValueError:
+                    continue
+                return index, replace(
+                    court, homography=matrix, inlier_count=inliers,
+                    reprojection_error_m=error, status="fixed_homography",
+                )
+        raise ValueError(f"No frame yielded a valid homography from frame {init_frame} onward")
+
+    def run(self, video: Path, output_dir: Path) -> Path:
+        """Write the final video directly. Tracking and projection data stay in memory."""
+        output_dir = output_dir.resolve()
+        output_dir.mkdir(parents=True, exist_ok=False)
+        video_path = output_dir / "annotated.mp4"
+        try:
             pose_threshold = getattr(getattr(self.players, "settings", None), "pose_confidence", 0.3)
             court_threshold = getattr(getattr(self.court, "settings", None), "court_keypoint_confidence", 0.5)
+            calibration = self._calibrate(video, court_threshold) if self.court is not None else None
+            if calibration is not None:
+                LOGGER.info("Fixed H calibrated from frame %s", calibration[0])
+
+            samples = None
+            if self.shuttle is not None:
+                LOGGER.info("Running TrackNet and InpaintNet")
+                samples = self.shuttle.predict_video(video)
+            if self.players is not None:
+                self.players.reset()
+
+            with VideoReader(video) as reader:
+                self._write_video(reader, video_path, calibration, samples, pose_threshold, court_threshold)
+        except BaseException:
             try:
+                video_path.unlink(missing_ok=True)
+                output_dir.rmdir()
+            except OSError:
+                LOGGER.exception("Could not clean failed output %s", output_dir)
+            raise
+        return video_path
+
+    def _write_video(self, reader, video_path, calibration, samples, pose_threshold, court_threshold):
+        writer = cv2.VideoWriter(
+            str(video_path), cv2.VideoWriter_fourcc(*"mp4v"), reader.info.fps,
+            (reader.info.width, reader.info.height),
+        )
+        trail = collections.deque(maxlen=_TRAIL_LEN)
+        reference_index, reference = calibration if calibration is not None else (None, None)
+        matrix = reference.homography if reference is not None else None
+        count = 0
+        try:
+            if not writer.isOpened():
+                raise RuntimeError(f"Cannot open video writer: {video_path}")
+            for index, timestamp, frame in reader:
+                result = FrameResult(index, timestamp)
+                if self.court is not None:
+                    court = reference if index == reference_index else self.court.process(frame)
+                    result.court = replace(court or Court(), homography=matrix)
                 if self.players is not None:
-                    self.players.reset()
-                samples = None
-                if self.shuttle is not None:
-                    LOGGER.info("Running TrackNet and InpaintNet passes")
-                    samples = self.shuttle.predict_video(video, output_dir / "shuttle")
-                writer = cv2.VideoWriter(
-                    str(video_path), cv2.VideoWriter_fourcc(*"mp4v"), reader.info.fps,
-                    (reader.info.width, reader.info.height),
-                )
-                if not writer.isOpened():
-                    raise RuntimeError(f"Cannot open video writer: {video_path}")
-                with partial.open("w", encoding="utf-8") as stream:
-                    for index, timestamp, frame in reader:
-                        result = FrameResult(index, timestamp)
-                        if self.court is not None:
-                            result.court = self.court.process(frame)
-                        matrix = result.court.homography if result.court is not None else None
-                        if self.players is not None:
-                            result.players = self.players.process(frame, court=result.court)
-                            for player in result.players:
-                                player.court_xy_m = project_point(matrix, player.foot_pixel)
-                                player.on_court = on_court(player.court_xy_m)
-                        if samples is not None:
-                            if index not in samples:
-                                raise ValueError(
-                                    f"Shuttle output missing decoded video frame {index}"
-                                )
-                            result.shuttle = samples[index]
-                            result.shuttle.court_projection_m = project_point(
-                                matrix, result.shuttle.pixel
-                            )
-                        stream.write(json.dumps(asdict(result), allow_nan=False) + "\n")
-                        writer.write(render_frame(frame, result, trail, pose_threshold, court_threshold))
-                        count += 1
-                        if count % 100 == 0:
-                            LOGGER.info("Processed %s frames", count)
-                if count == 0:
-                    raise ValueError("Video contains no decodable frames")
-                if samples is not None and set(samples) != set(range(count)):
-                    raise ValueError("Shuttle output frame count differs from decoded video")
+                    result.players = self.players.process(frame, court=result.court)
+                    for player in result.players:
+                        player.court_xy_m = project_point(matrix, player.foot_pixel)
+                        player.on_court = on_court(player.court_xy_m)
                 if samples is not None:
-                    self._write_shuttle_csv(output_dir / "shuttle.csv", samples, reader.info.fps)
+                    if index not in samples:
+                        raise ValueError(f"Shuttle output missing decoded video frame {index}")
+                    result.shuttle = samples[index]
+                    result.shuttle.court_projection_m = project_point(matrix, result.shuttle.pixel)
 
-                writer.release()
-                writer = None
-                LOGGER.info("Annotated video written to %s", video_path)
-                partial.replace(output_dir / "frames.jsonl")
-                metadata.update(status="complete", processed_frames=count)
-            except BaseException as exc:
-                metadata.update(status="failed", processed_frames=count, error=str(exc))
-                raise
-            finally:
-                if writer is not None:
-                    writer.release()
-                write_json(metadata_path, metadata)
-        return output_dir
+                render_frame(frame, result, trail, pose_threshold, court_threshold)
+                if result.court is not None:
+                    draw_mini_court(frame, asdict(result))
+                writer.write(frame)
+                count += 1
+                if count % 100 == 0:
+                    LOGGER.info("Processed %s frames", count)
 
-    @staticmethod
-    def _write_shuttle_csv(path, samples, fps):
-        with path.open("w", newline="", encoding="utf-8") as stream:
-            writer = csv.writer(stream)
-            writer.writerow(
-                [
-                    "frame_index",
-                    "timestamp_s",
-                    "x",
-                    "y",
-                    "visible",
-                    "confidence",
-                    "raw_x",
-                    "raw_y",
-                    "rectified",
-                    "source",
-                    "court_x_m",
-                    "court_y_m",
-                ]
-            )
-            for index, sample in sorted(samples.items()):
-                writer.writerow(
-                    [
-                        index,
-                        index / fps,
-                        *(sample.pixel or (None, None)),
-                        int(sample.visible),
-                        sample.confidence,
-                        *(sample.raw_pixel or (None, None)),
-                        int(sample.rectified),
-                        sample.source,
-                        *(sample.court_projection_m or (None, None)),
-                    ]
-                )
+            if count == 0:
+                raise ValueError("Video contains no decodable frames")
+            if samples is not None and len(samples) != count:
+                raise ValueError("Shuttle output frame count differs from decoded video")
+        finally:
+            writer.release()

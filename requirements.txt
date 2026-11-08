@@ -7,5 +7,6 @@ opencv-python>=4.8,<4.12
 ultralytics>=8.4.47,<9
 huggingface-hub>=0.25,<2
 lap>=0.5.12
+safetensors==0.5.3
 # RTMPose's platform-specific MMPose/MMCV setup is documented in README.md.
 # TrackNet runs in its own environment when tracknet_python is set.
