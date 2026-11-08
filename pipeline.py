@@ -507,6 +507,24 @@ class Pipeline:
                     except Exception as exc:
                         LOGGER.warning("SpacetimeDB push (shots/summary) failed: %s", exc)
 
+            if events:
+                from module7_summary.rallies import build_rallies, write_rallies
+
+                with partial.open(encoding="utf-8") as stream:
+                    rally_frames = [json.loads(line) for line in stream if line.strip()]
+                rallies, rally_info = build_rallies(
+                    rally_frames, [asdict(e) for e in events],
+                    [asdict(s) for s in shot_events], video_info["fps"],
+                )
+                write_rallies(output_dir, rallies)
+                metadata["rallies"] = rally_info
+                LOGGER.info("Rallies: %s", rally_info)
+                if stdb is not None:
+                    try:
+                        stdb.push_rallies(run_id, rallies)
+                    except Exception as exc:
+                        LOGGER.warning("SpacetimeDB push (rallies) failed: %s", exc)
+
             partial.replace(output_dir / "frames.jsonl")
             if self.court is not None:
                 metadata["court_model_inferences"] = getattr(self.court, "inference_count", 0)

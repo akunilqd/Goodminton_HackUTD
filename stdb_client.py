@@ -213,6 +213,35 @@ class StdbClient:
                 shot.get("player_side", ""),
             ])
 
+    # ── Push: rallies (M7) ────────────────────────────────────────────────────
+
+    def clear_rallies(self, run_id: str):
+        self._post("clear_rallies", [run_id])
+
+    def push_rallies(self, run_id: str, rallies: list[dict]):
+        for rally in rallies:
+            landing = rally.get("landing_xy_m") or (0.0, 0.0)
+            self._post("add_rally", [
+                run_id,
+                int(rally["rally_index"]),
+                int(rally["game"]),
+                int(rally["start_frame"]),
+                int(rally["end_frame"]),
+                float(rally["start_s"]),
+                float(rally["end_s"]),
+                int(rally["shot_count"]),
+                int(rally["first_event_id"]),
+                int(rally["last_event_id"]),
+                int(rally["last_hitter_id"]),
+                int(rally["winner_id"]),
+                rally["outcome"],
+                float(landing[0]),
+                float(landing[1]),
+                int(rally["score_after"]["1"]),
+                int(rally["score_after"]["2"]),
+                bool(rally["score_reliable"]),
+            ])
+
     # ── Push: summary (M7 analytics) ─────────────────────────────────────────
 
     def push_summary(

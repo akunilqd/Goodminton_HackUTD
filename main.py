@@ -153,6 +153,10 @@ def build_parser(settings):
     stdb_cmd.add_argument("--server", default="http://localhost:3000", help="SpacetimeDB server URL")
     stdb_cmd.add_argument("--token", default=None, help="Auth token (optional)")
     stdb_cmd.add_argument("--no-clear", action="store_true", help="Skip clearing existing data for this run_id")
+    rallies_cmd = sub.add_parser("publish-rallies", help="Build rallies for a saved run and publish them to SpacetimeDB")
+    rallies_cmd.add_argument("run_dir", type=Path, help="Run directory containing frames.jsonl and hits.jsonl")
+    rallies_cmd.add_argument("--module", default="badminton", help="SpacetimeDB module name (default: badminton)")
+    rallies_cmd.add_argument("--server", default="https://maincloud.spacetimedb.com", help="SpacetimeDB server URL")
     return parser
 
 
@@ -278,6 +282,11 @@ def main(argv=None):
                 clear_first=not args.no_clear,
             )
             print(json.dumps(result, indent=2))
+            return 0
+        if args.command == "publish-rallies":
+            from module7_summary.rallies import publish_saved_run
+
+            print(json.dumps(publish_saved_run(args.run_dir, module=args.module, server=args.server), indent=2))
             return 0
         if args.command == "court-frame":
             court_frame(settings, args)
