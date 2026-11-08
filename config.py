@@ -12,7 +12,7 @@ PROJECT_DIR = Path(__file__).resolve().parent
 class Settings:
     # Input / Output
     video: Path = Path("data/match178_000.mp4")
-    output: Path = Path("outputs/run2")
+    output: Path = Path("outputs/run3")
     modules: tuple = ("1", "2", "3", "4")
 
     # Module 1: YOLO11 + ByteTrack + RTMPose-L.

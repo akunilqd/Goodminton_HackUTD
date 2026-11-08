@@ -21,10 +21,13 @@ Match Video
              [M5] Shot Classification
              Smash / Clear / Drop / Drive / Lift / Serve
                       ↓
-             [M6] Analytics
-             ├── 2D court map
+             [M6] Speed Calculations
+             ├── Shuttle Speed
+             ├── Player speed
+                      ↓
+             [M7] Speed Calculations
              ├── Player heatmap
-             ├── Shuttle trajectory
+             ├── 
              ├── Estimated speed
              ├── Shot statistics
              └── Rally timeline
