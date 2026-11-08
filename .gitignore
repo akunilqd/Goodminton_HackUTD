@@ -10,6 +10,7 @@ weights/
 
 # Python
 __pycache__/
+.venv-setup/
 *.pyc
 *.pyo
 *.pyd
