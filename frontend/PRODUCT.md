@@ -39,7 +39,7 @@ The court is the interface. Analysis is shown on the court itself (rally paths, 
 - Name: **Goodminton**.
 - Visual ambition (updated 2026-11-07): the user wants the site as immersive, interactive and distinctive as the HackUTD 2026 and HackUTA 2026 websites. That means an illustrated, themed world that owns the page, with custom lettering and motion; "no ordinary, only special, unique, attractive designs". This replaces the original paper/ink/one-accent constraint, which now lives only in the first build at the project root (kept unless the user asks to remove it).
 - **Strung** (`strung/`) is the chosen world (decided 2026-11-07). The site is a strung racket head hanging in a night sky. Palette (changed 2026-11-07 at the user's request) matches the HackUTD 2026 site exactly: black / #0e011f ground, #f4f2ff strings and text, electric violet #7828ff for actions, magenta #ff2ee6 for neon lettering and plates, lavender #dbc4ff for accent words, and cyan #22e0ff reserved for the selection. The racket → court morph is time-driven (fixed duration, stage pinned while it plays), never scroll-scrubbed. It shares the product engine in `assets/js/`. A second world, Night Hall, was built for comparison and removed at the user's request.
-- Still binding: no fake AI-dashboard clichés. Measured facts and suggestions stay visibly separate, and illustrative data stays labelled.
+- Still binding: Measured facts and suggestions stay visibly separate, and illustrative data stays labelled.
 - Homepage headline: "Find the moments that changed the match."
 
 ## Evidence on Hand
@@ -51,9 +51,9 @@ The court is the interface. Analysis is shown on the court itself (rally paths, 
 
 1. Facts and suggestions never share a voice. A count is a measurement; coaching guidance is phrased as a suggestion.
 2. Every chart points back to the video. If a moment can't be rewatched, it doesn't belong in the report.
-3. Be honest about process. Status, limits and confidence are stated plainly; nothing is implied.
+3. Be honest about process. Status, limits and confidence are stated plnly; nothing is implied.
 4. Show the real product, not marketing about it.
 
 ## Accessibility & Inclusion
 
-Deliberate keyboard focus, loading, error and empty states. Respect reduced-motion settings; motion only explains an action, such as tracing a selected rally.
+Deliberate keyboard focus, loading, error and empty states. Respect reduced-motion settings; motion only explns an action, such as tracing a selected rally.
