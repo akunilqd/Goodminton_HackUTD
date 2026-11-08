@@ -1,18 +1,17 @@
 """Coordinate modules without coupling their inference implementations."""
 
 import collections
-import csv
 import json
 import logging
 import math
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 
 import cv2
 import numpy as np
 
-from module3_court.geometry import on_court, project_point
-from schemas import FrameResult
+from module3_court.geometry import draw_mini_court, fit_detector_homography, on_court, project_point
+from schemas import Court, FrameResult
 from video import VideoReader
 
 LOGGER = logging.getLogger(__name__)
@@ -196,8 +195,12 @@ class Pipeline:
         if hits is not None and (players is None or shuttle is None):
             raise ValueError("Module 4 requires player and shuttle modules")
 
-    def run(self, video: Path, output_dir: Path) -> Path:
-        # Open before creating artifacts; never overwrite an earlier run.
+    def _calibrate(self, video, confidence):
+        """Read ahead for the first valid H before writing any output frames."""
+        init_frame = getattr(self.court, "init_frame", 0)
+        reset = getattr(self.court, "reset", None)
+        if reset is not None:
+            reset()
         with VideoReader(video) as reader:
             output_dir = output_dir.resolve()
             output_dir.mkdir(parents=True, exist_ok=False)
@@ -224,7 +227,45 @@ class Pipeline:
             trail = collections.deque(maxlen=_TRAIL_LEN)
             pose_threshold = getattr(getattr(self.players, "settings", None), "pose_confidence", 0.3)
             court_threshold = getattr(getattr(self.court, "settings", None), "court_keypoint_confidence", 0.5)
+            calibration = self._calibrate(video, court_threshold) if self.court is not None else None
+            if calibration is not None:
+                LOGGER.info("Fixed H calibrated from frame %s", calibration[0])
+
+            samples = None
+            if self.shuttle is not None:
+                LOGGER.info("Running TrackNet and InpaintNet")
+                samples = self.shuttle.predict_video(video)
+            if self.players is not None:
+                self.players.reset()
+
+            with VideoReader(video) as reader:
+                self._write_video(reader, video_path, calibration, samples, pose_threshold, court_threshold)
+        except BaseException:
             try:
+                video_path.unlink(missing_ok=True)
+                output_dir.rmdir()
+            except OSError:
+                LOGGER.exception("Could not clean failed output %s", output_dir)
+            raise
+        return video_path
+
+    def _write_video(self, reader, video_path, calibration, samples, pose_threshold, court_threshold):
+        writer = cv2.VideoWriter(
+            str(video_path), cv2.VideoWriter_fourcc(*"mp4v"), reader.info.fps,
+            (reader.info.width, reader.info.height),
+        )
+        trail = collections.deque(maxlen=_TRAIL_LEN)
+        reference_index, reference = calibration if calibration is not None else (None, None)
+        matrix = reference.homography if reference is not None else None
+        count = 0
+        try:
+            if not writer.isOpened():
+                raise RuntimeError(f"Cannot open video writer: {video_path}")
+            for index, timestamp, frame in reader:
+                result = FrameResult(index, timestamp)
+                if self.court is not None:
+                    court = reference if index == reference_index else self.court.process(frame)
+                    result.court = replace(court or Court(), homography=matrix)
                 if self.players is not None:
                     self.players.reset()
                 if self.court is not None:

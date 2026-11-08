@@ -7,7 +7,7 @@ import logging
 from dataclasses import asdict, replace
 from pathlib import Path
 
-from config import Settings, require_file
+from config import DEFAULT_COURT_WEIGHTS, Settings, require_file
 
 
 def configure_device(value: str) -> str:
@@ -33,7 +33,7 @@ def configure_device(value: str) -> str:
     return "cpu"
 
 
-def preflight(settings: Settings, modules: set[str]):
+def preflight(settings: Settings, modules: set[str], *, use_saved_court=False):
     errors, warnings = [], []
     if "4" in modules and not {"1", "2", "3"}.issubset(modules):
         errors.append("Video M4 requires --modules 1 2 3 4; use detect-hits to replay an existing run.")
@@ -42,14 +42,12 @@ def preflight(settings: Settings, modules: set[str]):
     packages = set()
     files = []
     devices = {}
-    if "4" in modules:
-        packages.add("numpy")
-        devices["4"] = "cpu"
-    if "1" in modules or ("3" in modules and not settings.court_calibration):
+    uses_court_model = "3" in modules and not (settings.court_calibration or use_saved_court)
+    if "1" in modules or uses_court_model:
         try:
             device = configure_device(settings.device)
             for module in modules & {"1", "3"}:
-                if module != "3" or not settings.court_calibration:
+                if module != "3" or uses_court_model:
                     devices[module] = device
         except (ImportError, ValueError, RuntimeError) as exc:
             errors.append(str(exc))
@@ -117,6 +115,39 @@ def build_parser(settings):
     return parser
 
 
+class SavedFixedCourt:
+    """Supply a saved calibration to the tracking pipeline for the same clip."""
+
+    def __init__(self, detections: Path, video: Path):
+        import numpy as np
+
+        from schemas import Court
+        from video import VideoReader
+
+        with detections.with_name("metadata.json").open(encoding="utf-8") as stream:
+            metadata = json.load(stream)
+        with VideoReader(video) as reader:
+            original = metadata["video"]
+            if (Path(original["source"]).resolve() != reader.path
+                    or (original["width"], original["height"]) != (reader.info.width, reader.info.height)):
+                raise ValueError("--court-detections must come from this video at its current resolution")
+        with detections.open(encoding="utf-8") as stream:
+            record = json.loads(stream.readline())
+        self.court = Court(**record["court"])
+        matrix = np.asarray(self.court.homography, dtype=float)
+        points = np.asarray(self.court.keypoints, dtype=float)
+        if (metadata["status"] != "complete"
+                or self.court.status not in {"fixed_courtkeynet", "manual_calibration"}
+                or matrix.shape != (3, 3) or not np.isfinite(matrix).all()
+                or np.linalg.matrix_rank(matrix) != 3
+                or points.ndim != 2 or points.shape[1] != 3 or len(points) < 4
+                or not np.isfinite(points).all()):
+            raise ValueError("--court-detections requires a completed fixed calibration run")
+
+    def process(self, frame):
+        return self.court
+
+
 def court_frame(settings, args):
     import cv2
 
@@ -178,7 +209,14 @@ def main(argv=None):
         if args.command == "run":
             settings = replace(settings, court_init_frame=args.court_init_frame)
         modules = set(args.modules)
-        report = preflight(settings, modules)
+        saved_court = None
+        if args.command == "run" and args.court_detections is not None:
+            if "3" not in modules:
+                raise ValueError("--court-detections requires Module 3")
+            if settings.court_calibration:
+                raise ValueError("Choose either --court-detections or court_calibration")
+            saved_court = SavedFixedCourt(args.court_detections, args.video)
+        report = preflight(settings, modules, use_saved_court=saved_court is not None)
         if args.command == "check":
             print(json.dumps(report, indent=2))
             return 0 if report["ok"] else 1
@@ -197,8 +235,8 @@ def main(argv=None):
 
         players = PlayerTracker(settings) if "1" in modules else None
         shuttle = ShuttleTracker(settings) if "2" in modules else None
-        court = None
-        if "3" in modules:
+        court = saved_court
+        if "3" in modules and court is None:
             court = (
                 ManualCourt(settings.court_calibration, settings)
                 if settings.court_calibration
@@ -210,7 +248,7 @@ def main(argv=None):
         output = Pipeline(players, shuttle, court, hits).run(args.video, args.output)
         print(f"Analysis saved to {output}")
         return 0
-    except (OSError, ValueError, RuntimeError, ImportError, KeyError) as exc:
+    except (OSError, ValueError, RuntimeError, ImportError, KeyError, TypeError) as exc:
         logging.error("%s", exc)
         return 1
 

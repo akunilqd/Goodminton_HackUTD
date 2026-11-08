@@ -6,6 +6,7 @@ from pathlib import Path
 
 
 PROJECT_DIR = Path(__file__).resolve().parent
+DEFAULT_COURT_WEIGHTS = PROJECT_DIR / "weights/courtkeynet_finetuned.safetensors"
 
 
 @dataclass(frozen=True)
@@ -16,7 +17,7 @@ class Settings:
     modules: tuple = ("1", "2", "3", "4")
 
     # Module 1: YOLO11 + ByteTrack + RTMPose-L.
-    device: str = "cuda:0"  # Shared by M1, M2 and M3; CPU is an explicit opt-in.
+    device: str = "cuda:0"  # Use "cpu" on a machine without CUDA-enabled PyTorch.
     gpu_half: bool = True  # FP16 neural inference on CUDA; geometry stays FP32/FP64.
     player_weights: str = "weights/yolo11m.pt"
     player_confidence: float = 0.25
@@ -36,9 +37,9 @@ class Settings:
     tracknet_batch_size: int = 8
     tracknet_timeout_seconds: int = 3600
 
-    # Module 3: one-shot CourtKeyNet; None downloads pinned safetensors to temp cache.
+    # Module 3: None uses the local CourtKeyNet checkpoint or downloads it.
     court_weights: str | None = None
-    court_init_frame: int = 0  # Fixed-camera calibration frame, zero-based.
+    court_init_frame: int = 0
     court_keypoint_confidence: float = 0.5
     court_ransac_threshold_m: float = 0.15
     court_max_error_m: float = 0.2
