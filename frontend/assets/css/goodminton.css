@@ -139,7 +139,6 @@ p { margin: 0; text-wrap: pretty; }
   .nav-links { gap: var(--s-4); }
 }
 @media (max-width: 460px) {
-  .nav-links .signin { display: none; }
   .wordmark span { font-size: 1.3rem; }
 }
 
@@ -771,6 +770,7 @@ html.fs-lock, html.fs-lock body { overflow: hidden; }
 .fs-map { left: 1.4%; top: 21%; width: 15%; display: flex; flex-direction: column; gap: 4px; padding: 6px 6px 4px; }
 .fs-map .court-map { width: 100%; height: auto; display: block; }
 .fs-k { font-family: var(--f-display); font-weight: 800; font-size: .76rem; letter-spacing: .14em; text-transform: uppercase; }
+.fs-player { font-family: var(--f-display); font-weight: 800; font-size: .9rem; letter-spacing: .05em; padding-bottom: 5px; margin-bottom: 3px; border-bottom: 1px solid var(--rule); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fs-live { right: 1.4%; top: 5.5%; width: clamp(214px, 16.5%, 276px); }
 .hud-live { padding: 12px 15px 11px; display: flex; flex-direction: column; gap: 8px; font-family: var(--f-display); }
 .hl-head { display: flex; align-items: center; gap: 7px; font-weight: 800; font-size: .8rem; letter-spacing: .16em; text-transform: uppercase; padding-bottom: 7px; border-bottom: 1px solid var(--rule); }
@@ -821,3 +821,39 @@ html.fs-lock, html.fs-lock body { overflow: hidden; }
   .hl-v b { font-size: 1.25rem; }
 }
 .ls-k { display: inline-block; min-width: 11.5ch; }
+
+/* Timestamped analysis stays with the real video, including full screen. */
+.run-player.has-live-panel { display:grid; grid-template-columns:minmax(0,1fr) minmax(240px,290px); align-items:center; gap:16px; padding:12px; }
+.run-video-stage { position:relative; min-width:0; }
+.run-player.has-live-panel .run-video { display:block; width:100%; }
+.run-live-panel { min-width:0; }
+.tracked-live { width:100%; box-sizing:border-box; }
+.tracked-live .hl-head { flex-wrap:wrap; }
+.tracked-live .hl-by { width:auto; max-width:60%; overflow-wrap:anywhere; text-align:right; }
+.tracked-live .hl-table { table-layout:fixed; width:100%; }
+.tracked-live .hl-table { display:table; }
+.tracked-live .hl-table tbody tr:nth-child(n) { display:table-row; }
+.tracked-live .hl-head .hl-at, .tracked-live .hl-speed .hl-k { display:inline; }
+.tracked-live .hl-foot { display:block; }
+.tracked-live .hl-table th { white-space:normal; overflow-wrap:anywhere; }
+.tracked-live .hl-type { overflow-wrap:anywhere; }
+.tracked-live .hl-speed { flex-wrap:wrap; }
+.tracked-live .hl-v { margin-left:auto; }
+.tracked-live .hl-v b { width:auto; min-width:3ch; }
+.has-live-panel .run-fs-btn { opacity:1; bottom:52px; min-width:44px; min-height:44px; }
+.has-live-panel .run-fs-btn:focus-visible, .run-fs-exit:focus-visible { outline:2px solid #ff2ee6; outline-offset:3px; }
+.has-live-panel .run-video::-webkit-media-controls-fullscreen-button { display:none; }
+.run-fs-shell .run-player.has-live-panel { width:100%; padding:0; display:block; }
+.run-fs-shell .has-live-panel .run-video { max-height:100vh; width:100%; object-fit:contain; }
+.run-fs-shell .run-live-panel { position:absolute; right:1.4%; top:6%; width:clamp(240px,23vw,300px); max-height:80vh; overflow:auto; }
+.run-fs-shell .tracked-live { background:rgba(10,5,20,.94); border:1px solid #7828ff; border-top:2px solid #ff2ee6; padding:14px; }
+.run-player .tracked-live .hl-v { white-space:nowrap; }
+.run-player .tracked-live .hl-v > span { margin-left:4px; }
+.run-fs-shell .run-fs-exit { min-width:44px; min-height:44px; z-index:3; }
+@media (max-width:767px) {
+  .run-player.has-live-panel { grid-template-columns:minmax(0,1fr); padding:0; }
+  .run-live-panel { padding:12px; }
+  .run-fs-shell .run-player.has-live-panel { display:grid; max-height:100dvh; overflow:auto; }
+  .run-fs-shell .run-live-panel { position:static; width:auto; max-height:none; }
+  .run-fs-shell .has-live-panel .run-video { max-height:52vh; }
+}

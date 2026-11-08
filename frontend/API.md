@@ -48,6 +48,20 @@ All four are public. A `player_id` of 1 or 2 is a track ID. Court coordinates ar
 
 `upsert_run_meta`, `add_running_details_batch`, `add_shot_class`, `set_summary`, `add_rally`, `clear_rallies`, `clear_run`. Definitions are in `../rallymirror-backend/spacetimedb/src/index.ts`.
 
+## Upload and analysis service (`server.py`)
+
+Runs on the analysis computer at `http://localhost:8000` and also serves this website. It only listens on that computer by default, and it has no user accounts. Writes need the `X-Goodminton: 1` header and must come from the same site.
+
+| Method and path | Purpose |
+| --- | --- |
+| `POST /api/jobs?filename=&near=&far=` | Upload one MP4 or MOV as the raw request body (up to 4 GB). Returns the job, status 201 |
+| `GET /api/jobs/{id}` | `status` (`queued`, `running`, `complete`, `failed`, `cancelled`), `stage`, `filename`, `near`, `far`, `error`, `warnings`, `rallies`, `video_url` |
+| `POST /api/jobs/{id}/cancel` | Stop the analysis and delete the video |
+| `GET /api/videos/{id}` | The original video, with seeking |
+| `GET /api/health` | Liveness check |
+
+The job ID is also the run ID in SpacetimeDB. Jobs run one at a time. Videos and logs stay in `jobs/`.
+
 ## Client error codes
 
 | Code | Cause | Retried automatically | "Try again" shown |

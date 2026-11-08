@@ -46,6 +46,8 @@ def _read_token() -> str | None:
         if not cfg.exists():
             return None
         data = tomllib.loads(cfg.read_text(encoding="utf-8"))
+        if data.get("spacetimedb_token"):
+            return data["spacetimedb_token"]
         for srv in data.get("server", []):
             if isinstance(srv, dict) and srv.get("token"):
                 return srv["token"]
@@ -81,28 +83,28 @@ class StdbClient:
         headers = {"Content-Type": "text/plain"}
         if self.token:
             headers["Authorization"] = f"Bearer {self.token}"
-        resp = requests.get(url, data=query, headers=headers, timeout=30)
+        resp = requests.post(url, data=query.encode("utf-8"), headers=headers, timeout=30)
         if not resp.ok:
             raise RuntimeError(f"[sql] HTTP {resp.status_code}: {resp.text[:200]}")
         rows = resp.json()
         # SpacetimeDB returns [{"schema": {...}, "rows": [...]}]
         if isinstance(rows, list) and rows and "rows" in rows[0]:
-            schema_cols = [c["name"] for c in rows[0]["schema"]["elements"]]
+            schema_cols = [c["name"].get("some") if isinstance(c["name"], dict) else c["name"]
+                           for c in rows[0]["schema"]["elements"]]
             return [dict(zip(schema_cols, r)) for r in rows[0]["rows"]]
         return []
 
     # ── Push: run metadata ────────────────────────────────────────────────────
 
-    def push_run_meta(self, run_id: str, video_source: str, fps: float, total_frames: int):
+    def push_run_meta(self, run_id: str, video_source: str, fps: float, total_frames: int,
+                      near_name: str = "", far_name: str = ""):
         self._post("upsert_run_meta", [
-            run_id, video_source, float(fps), int(total_frames), int(time.time() * 1000)
+            run_id, video_source, float(fps), int(total_frames), int(time.time() * 1000),
+            near_name or "", far_name or "",
         ])
 
     def clear_run(self, run_id: str):
-        try:
-            self._post("clear_run", [run_id])
-        except RuntimeError:
-            pass  # May not exist yet
+        self._post("clear_run", [run_id])
 
     # ── Push: running_details (batch from frames.jsonl rows) ──────────────────
 
@@ -140,7 +142,7 @@ class StdbClient:
                     cur_row["frame_index"] + 1 != next_row["frame_index"]):
                 return 0.0
             p0, p1, p2 = pos_fn(prev_row), pos_fn(cur_row), pos_fn(next_row)
-            if p0 == (0.0, 0.0) or p2 == (0.0, 0.0):
+            if (0.0, 0.0) in (p0, p1, p2):
                 return 0.0
             dt_b = cur_row["timestamp_s"] - prev_row["timestamp_s"]
             dt_a = next_row["timestamp_s"] - cur_row["timestamp_s"]
@@ -208,9 +210,9 @@ class StdbClient:
                 float(hit["timestamp_s"]),
                 int(hit.get("hitter_id") or 0),
                 float(hit.get("hit_score", 0)),
-                shot.get("shot_type_en", ""),
+                shot.get("shot_type_en") or "",
                 float(shot.get("confidence", 0)),
-                shot.get("player_side", ""),
+                shot.get("player_side") or "",
             ])
 
     # ── Push: rallies (M7) ────────────────────────────────────────────────────
@@ -276,7 +278,7 @@ class StdbClient:
                         return float(cp[0]), float(cp[1])
                 return None
             p0, p1, p2 = _sh_xy(prev), _sh_xy(cur), _sh_xy(nxt)
-            if p0 is None or p2 is None:
+            if p0 is None or p1 is None or p2 is None:
                 return None
             dt_b = cur["timestamp_s"] - prev["timestamp_s"]
             dt_a = nxt["timestamp_s"] - cur["timestamp_s"]
@@ -330,14 +332,22 @@ class StdbClient:
             json.dumps(heatmaps.get(2, [])),
         ])
 
+    # ── Push: analysed video (chunked, the server caps request size) ─────────
+
+    def push_analyzed_video(self, run_id: str, video_path: Path, chunk_size: int = 256 * 1024):
+        self._post("begin_analyzed_video", [run_id])
+        with Path(video_path).open("rb") as stream:
+            while chunk := stream.read(chunk_size):
+                self._post("append_analyzed_video", [run_id, list(chunk)])
+
     # ── Fetch ─────────────────────────────────────────────────────────────────
 
     def fetch_running_details(self, run_id: str) -> list[dict]:
-        return self._sql(
-            f"SELECT * FROM running_details WHERE run_id = '{run_id}' ORDER BY frame_index ASC"
-        )
+        escaped = run_id.replace("'", "''")
+        return sorted(self._sql(f"SELECT * FROM running_details WHERE run_id = '{escaped}'"),
+                      key=lambda row: row["frame_index"])
 
     def fetch_shot_classes(self, run_id: str) -> list[dict]:
-        return self._sql(
-            f"SELECT * FROM shot_class WHERE run_id = '{run_id}' ORDER BY frame_index ASC"
-        )
+        escaped = run_id.replace("'", "''")
+        return sorted(self._sql(f"SELECT * FROM shot_class WHERE run_id = '{escaped}'"),
+                      key=lambda row: row["frame_index"])

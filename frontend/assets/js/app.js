@@ -333,6 +333,17 @@
     var bug = h('div', { class: 'bug', 'aria-hidden': 'true' });
     var stamp = h('div', { class: 'stamp', 'aria-hidden': 'true' });
     var label = h('div', { class: 'placeholder-label' }, ['Footage placeholder · sample still']);
+    var footage = null, footageSeeking = false;
+    if (M.video.src) {
+      footage = h('video', { class: 'footage', src: M.video.src, preload: 'auto', playsinline: true });
+      frame.appendChild(footage);
+      label.hidden = true;
+      footage.addEventListener('error', function () { // e.g. a codec this browser can't play
+        footage.remove(); footage = null;
+        label.hidden = false; label.textContent = 'This browser can’t play the original video · tracked positions shown';
+      });
+      footage.addEventListener('seeked', function () { footageSeeking = false; });
+    }
     frame.appendChild(bug); frame.appendChild(stamp); frame.appendChild(label);
     wrap.appendChild(frame);
 
@@ -359,7 +370,8 @@
       if (!st.playing) { raf = null; lastTs = null; return; }
       var dt = lastTs == null ? 0 : (ts - lastTs) / 1000;
       lastTs = ts;
-      var t = st.time + dt;
+      // real footage is the clock, so buffering pauses the overlays instead of letting them drift
+      var t = footage && !footage.paused && !footageSeeking ? footage.currentTime : st.time + dt;
       if (skipGaps) {
         var r = rallyAt(t);
         if (r && t > r.end + 1.8) {
@@ -376,9 +388,18 @@
       raf = requestAnimationFrame(tick);
     }
 
+    function syncFootage(st) {
+      if (!footage) return;
+      if (Math.abs(footage.currentTime - st.time) > 0.35) { footageSeeking = true; footage.currentTime = st.time; }
+      if (st.playing && footage.paused) {
+        footage.play().catch(function () { footage.muted = true; footage.play().catch(function () {}); });
+      } else if (!st.playing && !footage.paused) footage.pause();
+    }
+
     function render(st) {
       var t = st.time;
       var r = rallyAt(t);
+      syncFootage(st);
       clear(scene); clear(air); clear(layers.far);
       var posA = playerPos(r, 'A', t), posB = playerPos(r, 'B', t);
       figure(layers.far, posB[0], posB[1], 'B', P('B').code);

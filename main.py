@@ -122,6 +122,8 @@ def build_parser(settings):
             item.add_argument("--stdb-module", default="badminton", help="SpacetimeDB module name")
             item.add_argument("--stdb-server", default="https://maincloud.spacetimedb.com",
                               help="SpacetimeDB server URL")
+            item.add_argument("--near", default="", help="Near-side player name (stored in DB)")
+            item.add_argument("--far", default="", help="Far-side player name (stored in DB)")
     inspect = sub.add_parser("court-frame", help="Export numbered court keypoints for calibration")
     inspect.add_argument("video", type=Path, nargs="?", default=settings.video)
     inspect.add_argument("--frame", type=int, default=0)
@@ -141,6 +143,7 @@ def build_parser(settings):
     ann_shots = sub.add_parser("annotate-shots", help="Overlay BST shot labels on a run's annotated video")
     ann_shots.add_argument("run_dir", type=Path, help="Run directory containing shuttle.mp4 and shots.jsonl")
     ann_shots.add_argument("--output", type=Path, required=True, help="Output .mp4 file path")
+    ann_shots.add_argument("--names", default="", help='Player names, e.g. "1=CHOU T.C.,2=LANIER"')
     speed_cmd = sub.add_parser("speed-csv", help="Export per-frame player and shuttle speed to CSV")
     speed_cmd.add_argument("run_dir", type=Path, help="Run directory containing frames.jsonl")
     speed_cmd.add_argument("--output", type=Path, required=True, help="Output .csv file path")
@@ -244,7 +247,11 @@ def main(argv=None):
         if args.command == "annotate-shots":
             from pipeline import annotate_shots
 
-            result = annotate_shots(args.run_dir, args.output)
+            names = {}
+            for part in filter(None, (p.strip() for p in args.names.split(","))):
+                tid, _, name = part.partition("=")
+                names[int(tid)] = name.strip()
+            result = annotate_shots(args.run_dir, args.output, names)
             print(json.dumps(result, indent=2))
             return 0
         if args.command == "detect-hits":
@@ -341,7 +348,11 @@ def main(argv=None):
         if getattr(args, "stdb", False):
             from stdb_client import StdbClient
             stdb = StdbClient(module=args.stdb_module, server=args.stdb_server)
-        output = Pipeline(players, shuttle, court, hits, shot_classifier).run(args.video, args.output, stdb=stdb)
+        output = Pipeline(players, shuttle, court, hits, shot_classifier).run(
+            args.video, args.output, stdb=stdb,
+            near_name=getattr(args, "near", ""),
+            far_name=getattr(args, "far", ""),
+        )
         print(f"Analysis saved to {output}")
         return 0
     except (OSError, ValueError, RuntimeError, ImportError, KeyError, TypeError) as exc:

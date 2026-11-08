@@ -22,7 +22,6 @@
     <nav class="nav-links" aria-label="Main">
       <a href="library.html" class="hide-s">Match library</a>
       <a href="report.html" class="hide-s" aria-current="page">Sample report</a>
-      <a href="library.html" class="signin">Sign in</a>
       <a href="upload.html" class="btn btn-primary">Analyze a match</a>
     </nav>
   </div>
@@ -130,6 +129,7 @@
 <script src="../assets/js/data.js"></script>
 <script src="../assets/js/app.js"></script>
 <script src="../assets/js/board.js"></script>
+<script src="../assets/js/pipeline.js"></script>
 <script src="../assets/js/api-config.js"></script>
 <script src="../assets/js/api.js"></script>
 <script src="../assets/js/runs.js"></script>
@@ -174,7 +174,7 @@
     var data = document.createElement('span'); data.innerHTML = '<b class="num" data-duration hidden></b><b class="num" data-rallies></b> rallies with a result'; facts.append(data);
     note.textContent = '';
     var tag = document.createElement('span'); tag.className = 'tag'; tag.textContent = 'Estimated';
-    note.append(tag, ' Results come from where the shuttle was seen landing. The video is a placeholder driven by tracked positions.' +
+    note.append(tag, ' Results come from where the shuttle was seen landing.' + (M.video.src ? '' : ' The video is a placeholder driven by tracked positions.') +
       (M.undecided ? ' ' + M.undecided + (M.undecided === 1 ? ' rally' : ' rallies') + ' had no clear result and ' + (M.undecided === 1 ? 'is' : 'are') + ' left out, so scores may be lower than the real ones.' : ''));
     if (!M.turningPoints.length) root.querySelector('[aria-labelledby="tp-h"]').hidden = true;
     var intro = root.querySelector('[aria-labelledby="pl-h"] .intro');

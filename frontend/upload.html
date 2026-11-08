@@ -22,7 +22,6 @@
     <nav class="nav-links" aria-label="Main">
       <a href="library.html" class="hide-s">Match library</a>
       <a href="report.html" class="hide-s">Sample report</a>
-      <a href="library.html" class="signin">Sign in</a>
     </nav>
   </div>
 </header>
@@ -46,13 +45,14 @@
 
 <footer class="site-foot">
   <div class="wrap">
-    <p>Prototype: the upload is simulated, and no file leaves your browser.</p>
+    <p>Videos are processed on the analysis computer. Results are saved to your match library.</p>
     <nav aria-label="Footer"><a href="index.html">Home</a><a href="report.html">Sample report</a><a href="library.html">Match library</a></nav>
   </div>
 </footer>
 
 <script src="assets/js/data.js"></script>
 <script src="assets/js/app.js"></script>
+<script src="assets/js/pipeline.js"></script>
 <script src="assets/js/upload.js"></script>
 <script>document.addEventListener('DOMContentLoaded', function () { GM.mountUpload(document.querySelector('[data-upload]'), { id: 'page' }); });</script>
 </body>

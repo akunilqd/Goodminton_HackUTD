@@ -154,6 +154,23 @@ class ShotClassifier:
         self.net.eval()
         LOGGER.info("BST %s loaded from %s (device=%s)", model_name, bst_weights, self.device)
 
+    def _predict(self, prepared: list[tuple]) -> list[np.ndarray]:
+        """Return 18-class softmax for each window; each sample keeps its own padding mask."""
+        probabilities = []
+        for offset in range(0, len(prepared), self.settings.bst_batch_size):
+            chunk = prepared[offset:offset + self.settings.bst_batch_size]
+            pose, shuttle, pos, lengths = zip(*(window[7:10] + window[11:] for window in chunk))
+            hp = torch.from_numpy(np.stack(pose)).to(self.device)
+            hp = hp.reshape(len(chunk), self.seq_len, 2, _IN_DIM)
+            sh = torch.from_numpy(np.stack(shuttle)).to(self.device)
+            po = torch.from_numpy(np.stack(pos)).to(self.device)
+            vl = torch.tensor(lengths, dtype=torch.long, device=self.device)
+            logits = self.net(hp, sh, po, vl)
+            if logits.shape != (len(chunk), _N_CLASSES) or not torch.isfinite(logits).all():
+                raise RuntimeError("BST must return 18 finite logits per shot")
+            probabilities.extend(torch.softmax(logits.float(), dim=1).cpu().numpy())
+        return probabilities
+
     @torch.inference_mode()
     def classify(
         self,
@@ -181,6 +198,8 @@ class ShotClassifier:
         last_frame = max(frames, default=-1)
         min_seg = self.settings.bst_min_seg_frames
         conf_thr = self.settings.bst_conf_threshold
+        prepared = []
+
         for i, hit in enumerate(hits):
             start = hit["frame_index"]
             same_rally = (i + 1 < len(hits)
@@ -209,15 +228,13 @@ class ShotClassifier:
                 skipped.append({"shot_id": i + 1, "start_frame": start,
                                 "reason": "no_valid_player_pair_or_court"})
                 continue
-            hp = torch.from_numpy(pose).unsqueeze(0).to(self.device)
-            hp = hp.reshape(1, self.seq_len, 2, _IN_DIM)
-            sh = torch.from_numpy(shuttle).unsqueeze(0).to(self.device)
-            po = torch.from_numpy(pos).unsqueeze(0).to(self.device)
-            vl = torch.tensor([video_len], dtype=torch.long, device=self.device)
-            logits = self.net(hp, sh, po, vl)
-            if logits.shape != (1, _N_CLASSES) or not torch.isfinite(logits).all():
-                raise RuntimeError("BST must return 18 finite logits per shot")
-            probs = torch.softmax(logits.float(), dim=1)[0].cpu().numpy()
+            prepared.append((i, hit, end, input_start, input_end, flags, frame_rows,
+                             pose, shuttle, pos, valid, video_len))
+
+        probabilities = self._predict(prepared)
+        for window, probs in zip(prepared, probabilities):
+            i, hit, end, input_start, input_end, flags, frame_rows, _, _, pos, valid, video_len = window
+            start = hit["frame_index"]
             grouped = group_probabilities(probs)
             class_id = int(np.argmax(grouped))
             confidence = float(grouped[class_id])
@@ -251,6 +268,7 @@ class ShotClassifier:
             LOGGER.info("Shot %d hit=%d input=[%d-%d]: %s (conf=%.3f%s)",
                         shot.shot_id, start, input_start, input_end, shot.shot_type_en, confidence,
                         ", low" if shot.low_confidence else "")
+
         self.last_run_summary = {
             "input_hit_count": len(hits), "skipped_count": len(skipped),
             "skipped_segments": skipped,

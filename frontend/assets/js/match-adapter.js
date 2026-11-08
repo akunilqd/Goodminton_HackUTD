@@ -8,13 +8,13 @@
   var C = M.court, KNOWN = { serve: 1, clear: 1, drop: 1, smash: 1, net: 1, drive: 1, lift: 1, push: 1, block: 1 };
 
   function nearId(run) {
-    var votes = {};
-    run.shots.forEach(function (s) { if (s.playerId) votes[s.playerId] = (votes[s.playerId] || 0) + (s.side === 'Bottom' ? 1 : s.side === 'Top' ? -1 : 0); });
-    return (votes[1] || 0) > (votes[2] || 0) ? 1 : 2;
+    return 2; // Module 1 fixes P2 to the near end and P1 to the far end.
   }
   function round(v) { return Math.round(v * 100) / 100; }
 
-  function toMatch(run, frames) {
+  function safe(name) { return String(name || '').replace(/[<>&"']/g, '').trim(); }
+
+  function toMatch(run, frames, job) {
     var decided = (run.rallies || []).filter(function (r) { return r.winnerId; });
     if (!decided.length) throw new api.ApiError('no_rallies');
     var near = nearId(run), side = function (id) { return id === near ? 'A' : 'B'; };
@@ -26,6 +26,7 @@
     var rallies = [], games = [], game = null;
     decided.forEach(function (r) {
       var list = run.shots.filter(function (s) { return s.id >= r.firstEventId && s.id <= r.lastEventId; });
+      if (!list.length) return;
       if (!game || game.n !== r.game) {
         game = { n: r.game, first: rallies.length, last: rallies.length, score: { A: 0, B: 0 }, start: list[0].t };
         games.push(game);
@@ -75,22 +76,27 @@
       A: { id: 'A', name: 'Near player', short: 'Near', code: 'P' + near, hand: null, trackId: near },
       B: { id: 'B', name: 'Far player', short: 'Far', code: 'P' + (3 - near), hand: null, trackId: 3 - near }
     };
+    [['A', (job && safe(job.near)) || safe(run.nearName)], ['B', (job && safe(job.far)) || safe(run.farName)]].forEach(function (x) {
+      if (!x[1]) return;
+      var p = players[x[0]];
+      p.name = x[1]; p.short = x[1].split(/\s+/).pop(); p.code = p.short.slice(0, 3).toUpperCase();
+    });
     var turning = streaks(3).sort(function (a, b) { return b.len - a.len; }).slice(0, 3).sort(function (a, b) { return a.from - b.from; }).map(function (x, i) {
       var first = rallies[x.from], end = rallies[x.to], who = players[x.player].short;
       return {
         id: 'tp' + (i + 1), label: String(i + 1), game: x.game, from: x.from, to: x.to, rally: x.from,
-        title: who + ' player, ' + x.len + ' straight points',
+        title: who + ', ' + x.len + ' straight points',
         fact: x.len + ' straight points, ' + GM.score(first.scoreBefore) + ' to ' + GM.score(end.scoreAfter) + '.',
         suggestion: 'Worth rewatching to see what changed during this run.'
       };
     });
     return {
-      isLive: true, id: run.id, title: run.id, players: players, games: games, rallies: rallies,
+      isLive: true, id: run.id, title: players.A.name + ' vs ' + players.B.name, players: players, games: games, rallies: rallies,
       winner: wa === wb ? null : (wa > wb ? 'A' : 'B'), duration: round(rallies[rallies.length - 1].end - rallies[0].start),
-      video: { src: null, poster: null, length: run.durationS || round(rallies[rallies.length - 1].end + 5) },
+      video: { src: (job && job.video_url) || null, poster: null, length: run.durationS || round(rallies[rallies.length - 1].end + 5) },
       turningPoints: turning, runs: streaks(4),
       undecided: run.rallies.length - decided.length, scoreReliable: run.rallies.every(function (r) { return r.scoreReliable; }),
-      source: run
+      source: Object.assign({}, run, {nearName: players.A.name, farName: players.B.name}), trackingFrames: frames
     };
   }
 
@@ -105,7 +111,14 @@
     var run = await api.getRun(id, { signal: signal });
     if (!run.rallies || !run.rallies.some(function (r) { return r.winnerId; })) throw new api.ApiError('no_rallies');
     var frames = await api.getFrames(run, { signal: signal, onProgress: onProgress });
-    return hydrate(toMatch(run, frames));
+    var job = await GM.pipeline.jobIfAny(id);
+    var match = toMatch(run, frames, job);
+    if (job && job.analyzed_video_url) match.video.src = job.analyzed_video_url;
+    else {
+      var url = await api.getAnalyzedVideo(id, { signal: signal });
+      if (url) { match.video.src = url; window.addEventListener('pagehide', function () { URL.revokeObjectURL(url); }, {once: true}); }
+    }
+    return hydrate(match);
   };
   GM.toLiveMatch = toMatch;
 })();

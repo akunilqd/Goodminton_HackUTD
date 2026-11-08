@@ -19,6 +19,8 @@ class Settings:
     # Module 1: YOLO11 + ByteTrack + RTMPose-L.
     device: str = "cuda:0"  # Use "cpu" on a machine without CUDA-enabled PyTorch.
     gpu_half: bool = True  # FP16 neural inference on CUDA; geometry stays FP32/FP64.
+    cpu_workers: int = 8  # Threads preparing shuttle frames; changes speed, not inputs.
+    player_batch_size: int = 8  # Frames per YOLO/RTMPose forward pass.
     player_weights: str = "weights/yolo11m.pt"
     player_confidence: float = 0.25
     pose_confidence: float = 0.3
@@ -49,6 +51,7 @@ class Settings:
     bst_repo: Path = Path("external/BST-Badminton-Stroke-type-Transformer")
     bst_weights: Path = Path("weights/bst_CG_AP_JnB_bone.pt")
     bst_seq_len: int = 72
+    bst_batch_size: int = 64
     bst_model: str = "BST_CG_AP"
     bst_min_seg_frames: int = 15      # Flag shorter input windows; still infer with padding.
     bst_conf_threshold: float = 0.2  # Flag low confidence; always retain the winning class.
@@ -106,6 +109,9 @@ class Settings:
             if not 0 < getattr(self, name) <= 1:
                 raise ValueError(f"{name} must be in (0, 1]")
         for name in (
+            "cpu_workers",
+            "player_batch_size",
+            "bst_batch_size",
             "tracknet_batch_size",
             "tracknet_timeout_seconds",
             "court_ransac_threshold_m",

@@ -1,6 +1,5 @@
 /* Goodminton — upload flow
- * Front-end only for now: validation is real, the transfer is simulated.
- * Swap `transfer()` for a real multipart/resumable upload when the backend lands.
+ * Sends the file to the local analysis service (backend/server.py).
  */
 (function () {
   'use strict';
@@ -18,7 +17,7 @@
 
   GM.mountUpload = function (root, opts) {
     opts = opts || {};
-    var state = { file: null, duration: null, timer: null };
+    var state = { file: null, duration: null, upload: null };
 
     var input = h('input', { type: 'file', id: (opts.id || 'up') + '-file', accept: L.mime.join(',') + ',.mp4,.mov' });
     var errBox = h('div', { class: 'err', role: 'alert', hidden: true });
@@ -137,8 +136,8 @@
     }
 
     function reset() {
-      if (state.timer) clearInterval(state.timer);
-      state = { file: null, duration: null, timer: null };
+      if (state.upload) state.upload.abort();
+      state = { file: null, duration: null, upload: null };
       input.value = '';
       card.hidden = true; idle.hidden = false;
       start.disabled = false;
@@ -165,34 +164,32 @@
       transfer(near.value.trim(), far.value.trim());
     });
 
-    function transfer(a, b) {
-      var f = state.file, total = f.size, sent = 0;
-      form.hidden = true; progress.hidden = false; remove.hidden = true;
-      // simulated transfer: ~4–7 s regardless of size so the demo stays honest about being a demo
-      var dur = 4000 + Math.min(3000, total / 1e9 * 1200), t0 = performance.now();
-      state.timer = setInterval(function () {
-        var p = Math.min(1, (performance.now() - t0) / dur);
-        sent = total * p;
-        meter.querySelector('i').style.width = (p * 100).toFixed(1) + '%';
-        meter.setAttribute('aria-valuenow', Math.round(p * 100));
-        var left = Math.max(0, Math.ceil((dur - (performance.now() - t0)) / 1000));
-        ptext.textContent = Math.round(p * 100) + '% · ' + bytes(sent) + ' of ' + bytes(total) + (p < 1 ? ' · about ' + left + ' s left' : ' · done');
-        if (p >= 1) {
-          clearInterval(state.timer);
-          var q = new URLSearchParams({ name: f.name, size: String(total), a: a, b: b });
-          if (state.duration) q.set('len', String(Math.round(state.duration)));
-          setTimeout(function () { location.href = 'processing.html?' + q.toString(); }, 450);
-        }
-      }, 120);
-    }
-    cancel.addEventListener('click', function () {
-      if (state.timer) clearInterval(state.timer);
+    function restoreForm(message) {
+      state.upload = null;
       progress.hidden = true; form.hidden = false; remove.hidden = false;
       meter.querySelector('i').style.width = '0';
       ptext.textContent = '';
-      formErr.innerHTML = '<span>Upload cancelled. Nothing was kept. Start again, or remove the file.</span>';
-      formErr.hidden = false; formErr.style.color = 'var(--ink-2)';
-      start.focus();
-    });
+      formErr.textContent = message;
+      formErr.hidden = false;
+    }
+
+    function transfer(a, b) {
+      var f = state.file;
+      form.hidden = true; progress.hidden = false; remove.hidden = true; formErr.hidden = true; formErr.style.color = '';
+      ptext.textContent = 'Starting upload…';
+      state.upload = GM.pipeline.upload(f, { near: a, far: b }, function (sent, total) {
+        var p = sent / total;
+        meter.querySelector('i').style.width = (p * 100).toFixed(1) + '%';
+        meter.setAttribute('aria-valuenow', Math.round(p * 100));
+        ptext.textContent = Math.round(p * 100) + '% · ' + bytes(sent) + ' of ' + bytes(total);
+      });
+      state.upload.promise.then(function (job) {
+        location.href = '/strung/processing.html?job=' + encodeURIComponent(job.id);
+      }, function (err) {
+        if (err.message === 'cancelled') { formErr.style.color = 'var(--ink-2)'; restoreForm('Upload cancelled. Nothing was kept. Start again, or remove the file.'); start.focus(); return; }
+        restoreForm(err.message);
+      });
+    }
+    cancel.addEventListener('click', function () { if (state.upload) state.upload.abort(); });
   };
 })();

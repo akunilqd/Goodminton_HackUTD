@@ -254,8 +254,93 @@
       'where both players spent time (Movement) or where tracked shots landed (Landings) across the games you picked. Brighter means more.' }));
   }
 
+  // Real footage uses timestamped running_details, never the sample's simulated flights.
+  GM.trackedMetrics = function (run, input) {
+    var frames = input.slice().sort(function (a, b) { return a.t - b.t; });
+    var totals = [], shots = (run.shots || []).slice().sort(function (a, b) { return a.t - b.t; });
+    frames.forEach(function (f, i) {
+      var prev = frames[i - 1], d = i ? totals[i - 1].slice() : [0, 0];
+      ['p1', 'p2'].forEach(function (key, j) {
+        if (!prev || f.frame !== prev.frame + 1 || !f[key] || !prev[key]) return;
+        var dt = f.t - prev.t, step = Math.hypot(f[key][0] - prev[key][0], f[key][1] - prev[key][1]);
+        if (dt > 0 && step / dt <= 12) d[j] += step;
+      });
+      totals.push(d);
+    });
+    function lastAt(list, t) {
+      var lo = 0, hi = list.length;
+      while (lo < hi) { var mid = (lo + hi) >>> 1; if (list[mid].t <= t + 0.00001) lo = mid + 1; else hi = mid; }
+      return lo - 1;
+    }
+    return function (t) {
+      var i = lastAt(frames, t), f = frames[i];
+      if (!f || t - f.t > Math.max(0.1, 2 / (run.fps || 30))) f = null;
+      var rally = (run.rallies || []).find(function (r) { return t >= r.startS && t <= r.endS; });
+      var si = lastAt(shots, t), shot = shots[si];
+      if (shot && (rally ? shot.t < rally.startS : t - shot.t > 1.5)) shot = null;
+      var base = rally ? lastAt(frames, rally.startS) : -1;
+      var result = { frame: f, shot: shot, shotNumber: shot ? si + 1 : null, rally: rally, players: {} };
+      [1, 2].forEach(function (id) {
+        var pos = f && f['p' + id], speed = pos && f['p' + id + 'Speed'];
+        var depth = pos ? (id === 2 ? pos[1] - 6.7 : 6.7 - pos[1]) : null;
+        var zone = !pos ? null : pos[0] < 0 || pos[0] > 6.1 || pos[1] < 0 || pos[1] > 13.4 ? 'Outside' : depth < 1.98 ? 'Front' : depth < 4.6 ? 'Mid' : 'Rear';
+        result.players[id] = { speed: speed != null && speed >= 0 && speed <= 12 ? speed * 3.6 : null,
+          distance: f && pos ? totals[i][id - 1] - (base >= 0 ? totals[base][id - 1] : 0) : null, zone: zone };
+      });
+      result.shuttleSpeed = f && f.shuttle && f.shuttleSpeed != null ? f.shuttleSpeed * 3.6 : null;
+      return result;
+    };
+  };
+
+  GM.TrackedLivePanel = function (host, run) {
+    var box = h('section', { class: 'hud-live tracked-live', 'aria-label': 'Live analysis' });
+    box.innerHTML = '<div class="hl-head"><span class="live-dot" aria-hidden="true"></span><span class="hl-title">Live analysis</span><span class="hl-at num" data-at></span></div>' +
+      '<div class="hl-shot"><span class="hl-k" data-k></span><span class="hl-by" data-by></span></div><div class="hl-type" data-type></div>' +
+      '<div class="hl-speed"><span class="hl-k">Shuttle <span class="est">Est.</span></span><span class="hl-v num"><b data-sv></b><span>km/h</span></span></div>' +
+      '<div class="gauge" aria-hidden="true"><i data-sg></i></div>' +
+      '<table class="hl-table"><thead><tr><th scope="col">Metric</th><th scope="col" data-name="2"></th><th scope="col" data-name="1"></th></tr></thead><tbody>' +
+      ['Speed', 'Covered', 'Zone'].map(function (label, i) { return '<tr><th scope="row">' + label + '</th><td data-value="2-' + i + '"></td><td data-value="1-' + i + '"></td></tr>'; }).join('') +
+      '</tbody></table><p class="hl-foot" data-foot></p><p class="hl-foot" data-status role="status"></p>';
+    host.appendChild(box);
+    var q = function (sel) { return box.querySelector(sel); }, read = null, time = 0, playing = false;
+    var names = { 1: run.farName || 'Far player', 2: run.nearName || 'Near player' };
+    [1, 2].forEach(function (id) { q('[data-name="' + id + '"]').textContent = names[id]; });
+    function value(v) { return v == null ? '\u2014' : v.toFixed(1); }
+    function render(t, active) {
+      time = t; playing = active;
+      var d = read ? read(t) : { players: {1: {}, 2: {}} }, shot = d.shot;
+      box.classList.toggle('is-playing', !!active);
+      q('[data-at]').textContent = fmt(t);
+      q('[data-k]').textContent = shot ? 'Shot ' + d.shotNumber + ' / ' + run.shots.length : '';
+      q('[data-by]').textContent = shot ? names[shot.playerId] || '' : '';
+      q('[data-type]').textContent = shot ? shot.type || 'Unclassified' : '\u2014';
+      q('[data-sv]').textContent = value(d.shuttleSpeed);
+      q('[data-sg]').style.transform = 'scaleX(' + Math.min(1, (d.shuttleSpeed || 0) / 160) + ')';
+      [1, 2].forEach(function (id) {
+        var p = d.players[id];
+        [value(p.speed), value(p.distance), p.zone || '\u2014'].forEach(function (v, i) { q('[data-value="' + id + '-' + i + '"]').textContent = v; });
+        q('[data-name="' + id + '"]').classList.toggle('on', !!shot && shot.playerId === id);
+      });
+      q('[data-foot]').textContent = 'Speed km/h | covered m ' + (d.rally ? 'this rally' : 'since start') + ' | 2D estimates';
+      if (read) q('[data-status]').textContent = !d.frame ? 'No tracking at this time' : shot && shot.confidence != null ? 'Class confidence ' + Math.round(shot.confidence * 100) + '%' : '';
+    }
+    render(0, false);
+    q('[data-status]').textContent = 'Loading tracking data...';
+    return { render: render, setStatus: function (message) { q('[data-status]').textContent = message; },
+      setFrames: function (frames) { read = GM.trackedMetrics(run, frames); render(time, playing); } };
+  };
+
+  function realLivePanel(host, store) {
+    var panel = GM.TrackedLivePanel(host, M.source);
+    panel.setFrames(M.trackingFrames || []);
+    store.on(function (st) { panel.render(st.time, st.playing); });
+    panel.render(store.get().time, store.get().playing);
+    return panel;
+  }
+
   // ---------- live analysis of the moment on screen
   function LivePanel(host, store, opts) {
+    if (M.isLive) return realLivePanel(host, store);
     opts = opts || {};
     var box = h('section', { class: 'live' + (opts.compact ? ' live-hud' : ''), 'aria-label': 'Analysis of the moment on screen' });
     box.innerHTML =
@@ -330,6 +415,7 @@
 
   // ---------- compact overlay for full screen: only what you read at a glance, fixed widths so nothing shifts
   function HudPanel(host, store) {
+    if (M.isLive) return realLivePanel(host, store);
     var box = h('section', { class: 'hud-live', 'aria-label': 'Live analysis' });
     box.innerHTML =
       '<div class="hl-head"><span class="live-dot" aria-hidden="true"></span><span class="hl-title">Live</span><span class="hl-at num" data-at></span></div>' +
@@ -397,12 +483,14 @@
     function buildHud() {
       hud = h('div', { class: 'fs-hud' });
       mapBox = h('div', { class: 'fs-map' });
+      mapBox.appendChild(h('div', { class: 'fs-player' }, [P('A').name]));
       mapBox.appendChild(h('div', { class: 'fs-k' }, ['Court map']));
       var svg = GM.CourtMap(mapBox, store), heat = attachHeat(svg);
       function paint(st) { heat.paint(movementPoints(st.game, st.player)); }
       store.on(function (st, prev) { if (st.game !== prev.game || st.player !== prev.player) paint(st); });
       paint(store.get());
       liveBox = h('div', { class: 'fs-live' });
+      liveBox.appendChild(h('div', { class: 'fs-player fs-player-far' }, [P('B').name]));
       HudPanel(liveBox, store);
       hud.appendChild(mapBox); hud.appendChild(liveBox);
       frame.appendChild(hud);
@@ -526,7 +614,7 @@
       col.innerHTML =
         '<header class="pc-head">' +
           '<span class="pc-plate" aria-hidden="true">' + pl.code + '</span>' +
-          '<div><h3>' + pl.name + '</h3><p class="small">' + (M.isLive ? 'Tracked as player ' + pl.trackId + ' · ' : (pl.hand === 'left' ? 'Left' : 'Right') + '-handed · ') + (id === 'A' ? 'near' : 'far') + ' end on camera' + (M.isLive ? '' : ' · fictional player') + '</p></div>' +
+          '<div><h3>' + pl.name + '</h3><p class="small">' + (M.isLive ? '' : (pl.hand === 'left' ? 'Left' : 'Right') + '-handed · ') + (id === 'A' ? 'near' : 'far') + ' end on camera' + (M.isLive ? '' : ' · fictional player') + '</p></div>' +
           '<div class="pc-result num"><b>' + gw + '</b><span>games</span></div>' +
         '</header>' +
         '<div class="pc-group"><h4>' + (M.isLive ? 'Detected <span>model output, check against the footage</span>' : 'Measured <span>counted from the match</span>') + '</h4>' +

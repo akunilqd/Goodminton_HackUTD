@@ -9,6 +9,7 @@ import json
 import math
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 from config import PROJECT_DIR, Settings, require_file
@@ -79,6 +80,10 @@ class ShuttleTracker:
                 "tracknet_repo must be qaz812345/TrackNetV3 (the InpaintNet implementation); "
                 "alenzenx/TrackNetV3 is a different model"
             )
+        if Path(self.settings.tracknet_python) == Path(sys.executable):
+            from main import configure_device  # Spares a second slow torch import.
+
+            return configure_device(self.settings.device)
         # Check the actual subprocess interpreter, which may differ from main.py.
         try:
             result = subprocess.run(
@@ -107,6 +112,7 @@ class ShuttleTracker:
             str(self.settings.inpaintnet_weights.resolve()),
             device,
             str(self.settings.tracknet_batch_size),
+            "--workers", str(self.settings.cpu_workers),
         ]
         if self.settings.gpu_half:
             command.append("--half")

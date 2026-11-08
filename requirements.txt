@@ -4,6 +4,8 @@ torch==2.1.0
 torchvision==0.16.0
 numpy>=1.26,<2
 opencv-python>=4.8,<4.12
+# Unicode player names in annotated video.
+Pillow>=9.2,<13
 ultralytics>=8.4.47,<9
 huggingface-hub>=0.25,<2
 lap>=0.5.12
@@ -13,6 +15,7 @@ safetensors==0.5.3
 
 # SpacetimeDB HTTP uploader (M7).
 requests>=2.32,<3
+tomli>=2,<3; python_version < "3.11"
 
 # BST BadmintonDB inference (M5).
 positional-encodings>=6,<7
