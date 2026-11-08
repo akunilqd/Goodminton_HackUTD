@@ -38,7 +38,7 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 
-from config import Settings, require_file
+from config import DEFAULT_COURT_WEIGHTS, Settings, require_file
 from schemas import Court
 from .geometry import fit_homography
 

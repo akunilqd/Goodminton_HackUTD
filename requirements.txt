@@ -7,8 +7,16 @@ opencv-python>=4.8,<4.12
 ultralytics>=8.4.47,<9
 huggingface-hub>=0.25,<2
 lap>=0.5.12
+safetensors==0.5.3
 # RTMPose's platform-specific MMPose/MMCV setup is documented in README.md.
 # TrackNet runs in its own environment when tracknet_python is set.
+
+# SpacetimeDB HTTP uploader (M7).
+requests>=2.32,<3
+
+# BST BadmintonDB inference (M5).
+positional-encodings>=6,<7
+torchinfo>=1.8,<2
 
 # CourtKeyNet checkpoint loader (M3; inference architecture is embedded).
 safetensors==0.5.3

@@ -1,4 +1,4 @@
-"""Edit the Settings defaults below to configure all four modules."""
+"""Edit the Settings defaults below to configure the analysis pipeline."""
 
 import sys
 from dataclasses import dataclass
@@ -6,6 +6,7 @@ from pathlib import Path
 
 
 PROJECT_DIR = Path(__file__).resolve().parent
+DEFAULT_COURT_WEIGHTS = PROJECT_DIR / "weights/courtkeynet_finetuned.safetensors"
 
 
 @dataclass(frozen=True)
@@ -13,10 +14,10 @@ class Settings:
     # Input / Output
     video: Path = Path("data/match178_000.mp4")
     output: Path = Path("outputs/run3")
-    modules: tuple = ("1", "2", "3", "4")
+    modules: tuple = ("1", "2", "3", "4", "5")
 
     # Module 1: YOLO11 + ByteTrack + RTMPose-L.
-    device: str = "cuda:0"  # Shared by M1, M2 and M3; CPU is an explicit opt-in.
+    device: str = "cuda:0"  # Use "cpu" on a machine without CUDA-enabled PyTorch.
     gpu_half: bool = True  # FP16 neural inference on CUDA; geometry stays FP32/FP64.
     player_weights: str = "weights/yolo11m.pt"
     player_confidence: float = 0.25
@@ -36,13 +37,25 @@ class Settings:
     tracknet_batch_size: int = 8
     tracknet_timeout_seconds: int = 3600
 
-    # Module 3: one-shot CourtKeyNet; None downloads pinned safetensors to temp cache.
+    # Module 3: None uses the local CourtKeyNet checkpoint or downloads it.
     court_weights: str | None = None
-    court_init_frame: int = 0  # Fixed-camera calibration frame, zero-based.
+    court_init_frame: int = 0
     court_keypoint_confidence: float = 0.5
     court_ransac_threshold_m: float = 0.15
     court_max_error_m: float = 0.2
     court_calibration: Path | None = None  # JSON: manual fixed-camera calibration.
+
+    # Module 5: BST shot classification.
+    bst_repo: Path = Path("external/BST-Badminton-Stroke-type-Transformer")
+    bst_weights: Path = Path("weights/bst_CG_AP_JnB_bone.pt")
+    bst_seq_len: int = 72
+    bst_model: str = "BST_CG_AP"
+    bst_min_seg_frames: int = 15      # Flag shorter input windows; still infer with padding.
+    bst_conf_threshold: float = 0.2  # Flag low confidence; always retain the winning class.
+    # Experimental context window for the current BadmintonDB checkpoint.
+    bst_context_limit_s: float = 1.5
+    bst_context_fallback_s: float = 0.5  # No neighboring hit in the same rally.
+    bst_context_after_next_s: float = 0.25
 
     # Module 4: offline CPU heuristics; velocities are image diagonals / second.
     hit_max_gap_s: float = 0.08
@@ -69,6 +82,8 @@ class Settings:
             "tracknet_weights",
             "inpaintnet_weights",
             "court_calibration",
+            "bst_repo",
+            "bst_weights",
         ):
             value = getattr(self, name)
             if value is not None:
@@ -102,12 +117,23 @@ class Settings:
             "hit_min_speed",
             "hit_min_velocity_change",
             "hit_wrist_radius",
+            "bst_context_limit_s",
+            "bst_context_fallback_s",
+            "bst_context_after_next_s",
         ):
             value = getattr(self, name)
             if not 0 < value < float("inf"):
                 raise ValueError(f"{name} must be positive and finite")
         if not 0 < self.hit_turn_degrees < 180:
             raise ValueError("hit_turn_degrees must be in (0, 180)")
+        if not isinstance(self.bst_seq_len, int) or self.bst_seq_len < 1:
+            raise ValueError("bst_seq_len must be a positive integer")
+        if not isinstance(self.bst_min_seg_frames, int) or self.bst_min_seg_frames < 1:
+            raise ValueError("bst_min_seg_frames must be a positive integer")
+        if self.bst_model not in {"BST", "BST_CG", "BST_AP", "BST_CG_AP"}:
+            raise ValueError("bst_model must be one of BST, BST_CG, BST_AP, BST_CG_AP")
+        if not 0 < self.bst_conf_threshold <= 1:
+            raise ValueError("bst_conf_threshold must be in (0, 1]")
 
 
 def require_file(path: Path | None, setting: str) -> Path:

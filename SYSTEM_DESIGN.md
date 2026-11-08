@@ -19,7 +19,7 @@ Match Video
              [M4] Hit Detection
                       ↓
              [M5] Shot Classification
-             Smash / Clear / Drop / Drive / Lift / Serve
+             Smash / Clear / Drop / Drive / Net / Serve
                       ↓
              [M6] Speed Calculations
              ├── Shuttle Speed
@@ -134,14 +134,18 @@ Match Video
 
 ### Module 5 — Shot Classification (BST)
 
-**BST — Badminton Shot Transformer**
-- Repo: https://github.com/wywywywy/bst-badminton
-- Weights: available in repo releases or linked in README
-- Input: sequence of shuttle positions + player pose keypoints around a hit event
-- Output: shot type — `Smash | Clear | Drop | Drive | Lift | Serve`
-- Training / evaluation dataset:
-  - ShuttleSet: https://github.com/wywywywy/ShuttleSet
-  - ShuttleSet22: https://github.com/wywywywy/ShuttleSet22
+**BST — Badminton Stroke-type Transformer (BadmintonDB)**
+- Repo: https://github.com/Va6lue/BST-Badminton-Stroke-type-Transformer
+- Weight: `weights/bst_CG_AP_JnB_bone.pt` ([download](https://drive.google.com/file/d/1KXY62Q-5kSkgqUiJY88DApdsI2qDqZC5/view))
+- Model: `BST_CG_AP`, 18 native classes, sequence length 72, 17 joints + 19 bones per player.
+- Input: aligned two-player poses, normalized shuttle pixels, ankle positions projected through M3's homography, and sequence length; segments from M4 hits.
+- Experimental input context: previous hit to next hit + 0.25s, capped at -1.5s/+1.75s around the target; missing neighbors use 0.5s. Keep BadmintonDB weights for comparison. This window is adapted from ShuttleSet, not verified BadmintonDB annotation boundaries. JSON separates input context from label display bounds.
+- Output: `Smash | Clear | Drop | Drive | Net | Serve`, IDs 0–5.
+- Group both sides after softmax: Smash includes Net-Kill; Clear includes Net-Lift; Net includes Block. Drop, Drive and Serve retain their native type.
+- Threshold: `0.2`, flag low confidence while retaining the winning class; no Unknown.
+- JSON preserves native argmax, six probabilities, M4 hitter identity and skipped-segment diagnostics.
+- Normalization and sampling follow BadmintonDB. The application retains confirmed M1 IDs 1/2 outside court bounds and flags their positions; short segments are padded and flagged instead of dropped. Invalid/missing player pairs still zero-fill, and entirely unusable segments are skipped.
+- Accuracy and confidence calibration require labeled validation footage, especially for short and outside-court segments.
 
 ---
 
@@ -233,7 +237,7 @@ git clone https://github.com/qaz812345/TrackNetV3
 - [ ] Run court detector — confirm 4 corners and projected internal lines align
 - [ ] Verify homography by projecting corners to 2D top-down template
 - [ ] Run hit detector — confirm hit events flagged near wrist + shuttle proximity
-- [ ] Run BST — confirm shot labels from {Smash, Clear, Drop, Drive, Lift, Serve}
+- [ ] Validate BST accuracy against labeled footage for {Smash, Clear, Drop, Drive, Net, Serve}
 - [ ] Generate analytics: heatmap PNG, rally timeline PNG, stats JSON
 
 

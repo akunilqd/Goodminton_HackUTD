@@ -1,35 +1,26 @@
-# Local configuration and credentials
-.env
-.env.*
-
-# Python / development
-__pycache__/
-*.py[cod]
-.venv*/
-venv/
-.pytest_cache/
-.ruff_cache/
-.uv-cache/
-*.egg-info/
-build/
-dist/
-.coverage
-htmlcov/
-.idea/
-.vscode/
-.DS_Store
-Thumbs.db
-
-# External source, datasets, model weights, generated artifacts
-external/
-data/
+# Pipeline outputs
 outputs/
-runs/
-*.pt
-*.pth
-*.onnx
+data/
 *.mp4
 *.avi
-*.mov
-*.mkv
-*.log
+*.csv
+
+# Model weights
+weights/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+*.egg-info/
+
+# Node / SpacetimeDB module
+rallymirror-backend/spacetimedb/node_modules/
+
+# Misc
+.env
+.env.*
+*.partial.jsonl
